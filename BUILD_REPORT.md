@@ -1,44 +1,57 @@
-# Marketplace | YasReady v0.3.0 — Build Report
+# Marketplace | YasReady v0.4.0 — Build Report
 
-## Scope
-Commerce Closure on top of v0.2.0 Marketplace Engine. Publishing | YasReady remains untouched.
+## Result
 
-## Verified
-- Node source syntax: PASS (`worker.mjs`, `commerce.mjs`, `stripe-server.mjs`, `main.js`, verification script)
-- Foundation/commerce tests: PASS — 21/21
-- Fresh SQLite migration chain: PASS — 0001 through 0006 in order
-- Fresh schema result: PASS — 41 tables
-- Shared YasReady account mapping retained
-- Live checkout default: OFF
-- Stripe mode default: OFF
-- Refund operations default: OFF
-- Payout/transfer operations default: OFF
-- Ingram mode default: OFF
-- Publishing import default: OFF
+**PASS — package ready for repository upload / GitHub Pages demo.**
 
-## Commerce Closure additions
-- Historical order economics snapshot print/fulfillment cost at checkout
-- Idempotent paid-order materialization from verified Stripe webhook events
-- Per-author settlement allocations
-- Author commerce APIs for orders, ledger, payouts/transfers and fulfillment
-- Refund request path with server-only authorization and independent kill switch
-- Refund webhook reconciliation, including Stripe-originated refunds when payment intent maps to a YasReady order
-- Proportional refund allocation across order items/authors
-- Seller balance calculation: earned, refunded, paid out, available
-- Transfer creation path with balance ceiling and independent kill switch
-- Transfer paid/reversed reconciliation
-- Physical fulfillment jobs created only after payment materializes
-- Order status history, commerce exception, reconciliation, shipment, provider-document and audit schemas
-- Commerce UI workspace added to the demo app
+v0.4.0 is the Ingram Bridge build. It retains v0.3 Commerce Closure and adds provider-feed, fulfillment-document, invoice, retry, dead-letter and fulfillment-health architecture. It also fixes the GitHub Pages white-screen bootstrap found on the v0.3 repository deployment.
 
-## Not verified in this environment
-`npm run build` could not run because npm dependencies are not available locally and dependency download timed out. `vite` therefore is not installed in this sandbox. This is an environment/dependency-fetch limitation, not recorded as a source-code pass.
+## Verification completed
 
-Run locally after unzip:
+- `node --check src/main.js` — PASS
+- `node --check src/lib/analytics.js` — PASS
+- `node --check src/lib/ingram-bridge.mjs` — PASS
+- `node --check src/worker.mjs` — PASS
+- `npm run verify:pages` — **7/7 PASS**
+- `npm test` — **30/30 PASS**
+- fresh SQLite migration replay — **7/7 migrations PASS**
+- fresh schema after migrations — **48 application tables**
+- HTTP static-path smoke test — index, main JS, stylesheet, demo data and analytics module all resolve at `/yasready-marketplace/`
+
+## GitHub Pages incident fixed
+
+The v0.3 repository root used `/src/main.js`, which a GitHub project site resolves against `https://3dudes1life.github.io/` rather than `/yasready-marketplace/`. The browser was therefore not bootstrapping the app correctly. v0.4 changes the demo bootstrap to project-relative assets, moves CSS loading into HTML, guards native `import.meta.env`, lazy-loads QRCode so an optional CDN failure cannot blank the storefront, and adds a Pages deep-link fallback.
+
+`PAGES_VERIFY.command` / `npm run verify:pages` prevents regression.
+
+## Ingram Bridge additions
+
+- normalized readiness/capability model
+- metadata feed snapshots
+- inventory/availability + provider cost snapshots
+- provider sync cursors and run history
+- normalized purchase-order validation/envelope
+- PO acknowledgment / shipment / exception ingestion retained
+- provider invoice + invoice-line ingestion
+- fulfillment attempt ledger
+- bounded retry schedule
+- dead-letter queue
+- author fulfillment summary API
+- admin Ingram queue + dead-letter APIs
+- actual fulfillment-cost reconciliation back into Commerce Closure
+- external Ingram sales remain isolated from native Marketplace orders
+
+## Safety
+
+Every Ingram action remains fail-closed by default. In particular, `INGRAM_SUBMISSION_ENABLED=false`; this build does **not** invent or call an undocumented/private Ingram API.
+
+## Production bundle limitation in this environment
+
+`npm run build` could not execute because `vite` is not installed locally. `npm install` was attempted earlier in this environment and timed out downloading dependencies. Therefore the Vite production bundle is **not claimed as verified here**. Source syntax, engine tests, Pages checks, migration replay and static-path checks are verified.
+
+Run locally after dependency installation:
 
 ```bash
 npm install
 npm run verify
 ```
-
-Do not enable test/live checkout, refunds, payouts, or Ingram operations until the relevant provider credentials and operating policies are configured.

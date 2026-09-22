@@ -7,6 +7,7 @@ import {normalizeIngramStatus,buildFulfillmentRequest,ingramCapabilities} from '
 import {buildCampaignUrl,buildEmbedHtml,socialCopy} from '../src/lib/marketing.mjs';
 import {buildBusinessExport,BUSINESS_EXPORT_SCHEMA} from '../src/lib/business.mjs';
 import {verifyStripeSignature} from '../src/lib/stripe-server.mjs';
+import {ingramReadiness,normalizeInventoryRow,normalizeMetadataRow,normalizeInvoice,nextRetrySeconds,validatePhysicalOrder} from '../src/lib/ingram-bridge.mjs';
 
 const read=p=>fs.readFileSync(new URL(p,import.meta.url),'utf8');
 
@@ -32,3 +33,14 @@ test('commerce math prorates refunds and exposes seller balance',async()=>{const
 test('v0.3 snapshots fulfillment costs in pending order economics',()=>{const worker=read('../src/worker.mjs');assert.match(worker,/providerCostMinor/);assert.match(worker,/estimated_fulfillment_cost_minor/);assert.match(worker,/fulfillmentMinor/)});
 test('v0.3 keeps refund and payout toggles fail closed',()=>{const cfg=read('../wrangler.jsonc');assert.match(cfg,/"PAYOUTS_ENABLED": "false"/);assert.match(cfg,/"REFUNDS_ENABLED": "false"/)});
 test('Commerce Closure exposes author commerce APIs',()=>{const worker=read('../src/worker.mjs');for(const route of ['/api/me/orders','/api/me/ledger','/api/me/payouts','/api/me/fulfillment']) assert.match(worker,new RegExp(route.replaceAll('/','\\/')))});
+
+
+test('v0.4 GitHub Pages bootstrap is project-path safe',()=>{const h=read('../index.html'),m=read('../src/main.js'),a=read('../src/lib/analytics.js');assert.match(h,/src="\.\/src\/main\.js"/);assert.match(h,/href="\.\/src\/styles\.css"/);assert.match(m,/async function renderQr/);assert.doesNotMatch(m,/import '\.\/styles\.css'/);assert.match(a,/import\.meta\.env\?\./);assert.match(read('../404.html'),/yasready-marketplace/)});
+test('v0.4 Ingram Bridge migration adds feed, invoice, retry and dead-letter truth',()=>{const sql=read('../migrations/0007_ingram_bridge.sql');for(const name of ['fulfillment_attempts','provider_sync_cursors','provider_inventory_snapshots','provider_metadata_snapshots','provider_invoices','provider_invoice_lines','provider_dead_letters'])assert.match(sql,new RegExp(name))});
+test('v0.4 Ingram readiness stays fail closed without approved transport',()=>{const x=ingramReadiness({INGRAM_MODE:'cdf_edi',INGRAM_SUBMISSION_ENABLED:'false'});assert.equal(x.connected,true);assert.equal(x.canSubmit,false);assert.equal(x.reason,'submission_gate_off')});
+test('v0.4 inventory and metadata normalizers require ISBN and preserve provider truth',()=>{assert.deepEqual(normalizeInventoryRow({isbn:'978-1-23',availability:'In Stock',unitCostMinor:525}).availability,'available');assert.equal(normalizeMetadataRow({isbn:'978123',title:'Book'}).title,'Book');assert.throws(()=>normalizeInventoryRow({availability:'available'}),/isbn_required/)});
+test('v0.4 invoice normalization stays tied to order reference',()=>{const x=normalizeInvoice({orderReference:'YR-1',invoiceId:'INV-1',totalMinor:900,lines:[{orderItemId:'OI-1',amountMinor:700}]});assert.equal(x.orderReference,'YR-1');assert.equal(x.lines[0].amountMinor,700)});
+test('v0.4 validates physical orders before provider document preparation',()=>{const good=validatePhysicalOrder({order:{id:'O1'},items:[{id:'I1',format:'paperback',isbn:'9781',quantity:1}],shipTo:{address1:'1 Main',city:'X',postalCode:'1',country:'US'}});assert.equal(good.ok,true);const bad=validatePhysicalOrder({order:{id:'O1'},items:[{id:'I1',format:'paperback',quantity:1}],shipTo:{country:'US'}});assert.equal(bad.ok,false);assert.ok(bad.errors.some(x=>x.startsWith('isbn_required')))});
+test('v0.4 retry backoff is bounded',()=>{assert.equal(nextRetrySeconds(1),60);assert.equal(nextRetrySeconds(2),120);assert.equal(nextRetrySeconds(20),21600)});
+test('v0.4 keeps every Ingram action fail closed by default',()=>{const cfg=read('../wrangler.jsonc');for(const flag of ['INGRAM_SUBMISSION_ENABLED','INGRAM_METADATA_IMPORT_ENABLED','INGRAM_INVENTORY_IMPORT_ENABLED','INGRAM_INVOICE_IMPORT_ENABLED','INGRAM_RETRY_ENABLED'])assert.match(cfg,new RegExp(`"${flag}": "false"`))});
+test('v0.4 exposes provider operations without inventing a private Ingram endpoint',()=>{const w=read('../src/worker.mjs');for(const route of ['/api/providers/ingram/readiness','/api/providers/ingram/metadata/import','/api/providers/ingram/inventory/import','/api/providers/ingram/invoice/import','/api/admin/ingram/queue','/api/admin/ingram/dead-letters'])assert.match(w,new RegExp(route.replaceAll('/','\\/')));assert.doesNotMatch(w,/api\.ingram|ingramspark\.com\/api/i)});

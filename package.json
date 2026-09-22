@@ -1,9 +1,9 @@
 {
   "name": "yasready-marketplace",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
-  "description": "Marketplace | YasReady v0.3.0 \u2014 Commerce Pro with auditable Stripe Connect settlements, refunds/disputes, Ingram fulfillment orchestration and Business-ready analytics.",
+  "description": "Marketplace | YasReady v0.4.0 \u2014 Ingram Bridge with provider-feed ingestion, fulfillment document lifecycle, reconciliation, retry/dead-letter operations and GitHub Pages-safe demo deployment.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -14,7 +14,9 @@
     "cloudflare:deploy": "wrangler deploy --config wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply yasready-marketplace --local",
     "db:migrate:remote": "wrangler d1 migrations apply yasready-marketplace --remote",
-    "verify:commerce": "bash COMMERCE_PRO_VERIFY.command"
+    "verify:commerce": "bash COMMERCE_PRO_VERIFY.command",
+    "verify:pages": "node scripts/verify-pages.mjs",
+    "verify:ingram": "node --test tests/foundation.test.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

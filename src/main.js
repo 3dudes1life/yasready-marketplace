@@ -1,5 +1,3 @@
-import QRCode from 'qrcode';
-import './styles.css';
 import {account as demoAccount,books as demoBooks,dashboard as demoDashboard,campaigns as demoCampaigns} from './data/demo.js';
 import {track,campaignUrl} from './lib/analytics.js';
 import {authFetch} from './lib/session-client.js';
@@ -23,6 +21,15 @@ const formatLabel=f=>({ebook:'Ebook',paperback:'Paperback',hardcover:'Hardcover'
 
 const brandMark=`<span class="brandMark"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 10h12l8 15 8-15h12L37 36v17H27V36z" fill="white"/><circle cx="50" cy="49" r="5.5" fill="#dfff78"/></svg></span>`;
 
+async function renderQr(canvas,url){
+  try{
+    const mod=location.hostname.endsWith('.github.io')?await import('https://cdn.jsdelivr.net/npm/qrcode@1.5.4/+esm'):await import('qrcode');
+    const qr=mod.default||mod;return await qr.toCanvas(canvas,url,{width:250,margin:1,errorCorrectionLevel:'M'});
+  }catch{
+    canvas.width=250;canvas.height=250;const ctx=canvas.getContext('2d');ctx.fillStyle='#fff';ctx.fillRect(0,0,250,250);ctx.fillStyle='#1d1d1f';ctx.font='700 14px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';ctx.textAlign='center';ctx.fillText('QR preview unavailable',125,118);ctx.font='12px -apple-system,BlinkMacSystemFont,Segoe UI,sans-serif';ctx.fillText('Link still works normally',125,140);
+  }
+}
+
 function persistCart(){localStorage.setItem('yr.market.cart.v2',JSON.stringify(state.cart));}
 function avatarLetters(){return state.account.name.split(/\s+/).filter(Boolean).slice(0,2).map(x=>x[0]).join('').toUpperCase()||'YR';}
 function coverTheme(b){return b.cover||({
@@ -33,14 +40,14 @@ function coverTheme(b){return b.cover||({
 function cover(b,small=false){return `<div class="cover ${small?'small':''}" style="background:${coverTheme(b)}"><div class="coverTop">${b.series?esc(b.series):'YASREADY BOOKS'}</div><h3>${esc(b.title)}</h3><p>${esc(b.subtitle||b.author)}</p><span class="coverAuthor">${esc(b.author)}</span></div>`}
 
 function shell(){
-  const nav=[['store','Marketplace'],['dashboard','Home'],['books','My Books'],['sales','Sales'],['commerce','Commerce'],['marketing','Promote'],['integrations','Connections']];
+  const nav=[['store','Marketplace'],['dashboard','Home'],['books','My Books'],['sales','Sales'],['commerce','Commerce'],['fulfillment','Fulfillment'],['marketing','Promote'],['integrations','Connections']];
   return `<div class="topChrome">
     <div class="navWrap"><div class="shell nav">
       <button class="brand" data-nav="store">${brandMark}<span class="brandName">Marketplace <span class="brandDot">|</span> YasReady<small>Books made sellable.</small></span></button>
       <div class="navlinks">${nav.map(([id,label])=>`<button data-nav="${id}" class="${state.view===id?'active':''}">${label}</button>`).join('')}</div>
       <div class="navright"><button class="cartButton" data-cart>Bag <span class="cartCount ${state.cart.length?'':'hidden'}">${state.cart.length}</span></button><button class="avatar" data-nav="dashboard" title="Same YasReady account">${avatarLetters()}</button></div>
     </div></div>
-    <div class="modeStrip"><div class="shell"><span><strong>v0.3.0 · Marketplace Engine</strong> <i></i> ${state.api?'D1/API connected':'demo data'} <i></i> same YasReady account</span><span class="safePill">LIVE MONEY OFF</span></div></div>
+    <div class="modeStrip"><div class="shell"><span><strong>v0.4.0 · Ingram Bridge</strong> <i></i> ${state.api?'D1/API connected':'demo data'} <i></i> same YasReady account</span><span class="safePill">LIVE MONEY OFF</span></div></div>
   </div>`;
 }
 
@@ -105,10 +112,34 @@ function salesView(){const d=state.dashboard;return `<main class="view creatorVi
 function commerceView(){
   const d=state.dashboard;
   const gross=d.grossSales||248641, earned=d.authorEarnings||189420;
-  return `<main class="view creatorView">${pageHead('Commerce','Every dollar has a paper trail.','v0.3 separates checkout, payments, author earnings, refunds, transfers and fulfillment so YasReady can always explain what happened.',`<button class="btn secondary" data-nav="sales">Sales intelligence</button><button class="btn primary" data-nav="integrations">Provider status</button>`)}
+  return `<main class="view creatorView">${pageHead('Commerce','Every dollar has a paper trail.','v0.4 keeps the Commerce Closure ledger intact while adding a normalized fulfillment and provider-document layer around it.',`<button class="btn secondary" data-nav="sales">Sales intelligence</button><button class="btn primary" data-nav="integrations">Provider status</button>`)}
   <div class="shell"><div class="metricsGrid five">${metric('Captured',money(gross),'Paid Marketplace orders','purple')}${metric('Author earned',money(earned),'Ledger-backed earnings','limeCard')}${metric('Available',money(Math.max(0,earned-52340)),'Before next transfer')}${metric('Transferred',money(52340),'Demo payout ledger')}${metric('Refund reserve',money(1800),'Tracked separately')}</div>
   <div class="twoCol dashboardMain"><section class="panel"><div class="panelHead"><div><span class="microLabel">ORDER LIFECYCLE</span><h2>Nothing gets overwritten</h2></div></div><div class="flowList"><div><strong>1 · Checkout</strong><span>Server validates edition, seller, current price and inventory.</span></div><div><strong>2 · Payment</strong><span>Stripe webhook materializes the paid order exactly once.</span></div><div><strong>3 · Earnings</strong><span>Gross sale, marketplace fee, print reserve and seller payable become ledger entries.</span></div><div><strong>4 · Fulfillment</strong><span>Physical editions queue provider jobs; digital editions can grant entitlements.</span></div><div><strong>5 · Refund / transfer</strong><span>Reversals and payouts are separate records — history never gets rewritten.</span></div></div></section>
   <section class="panel"><div class="panelHead"><div><span class="microLabel">COMMERCE SAFETY</span><h2>Ready to test. Live money locked.</h2></div></div><div class="integrationMini"><strong>Stripe Checkout</strong><span>Test-mode architecture ready</span></div><div class="integrationMini"><strong>Connect sellers</strong><span>Same YasReady author account</span></div><div class="integrationMini"><strong>Refund allocation</strong><span>Pro-rated to the correct book + author</span></div><div class="integrationMini"><strong>Seller transfers</strong><span>Available balance cannot be exceeded</span></div><div class="integrationMini"><strong>Ingram fulfillment</strong><span>Paid physical items enter a queue</span></div><div class="noticeBar"><div class="noticeIcon">$</div><div><strong>Live money remains fail-closed.</strong><span>v0.3 ships with checkout, payouts and refunds disabled until credentials and policies are intentionally enabled.</span></div></div></section></div></div></main>`;
+}
+
+
+function fulfillmentView(){
+  const jobs=[
+    {order:'YR-1048',book:'Fault Lines',format:'Paperback',stage:'Ready to submit',detail:'PO envelope prepared · live transport off',tone:'ready'},
+    {order:'YR-1046',book:'Tres Amigos, Una Vida',format:'Paperback',stage:'Acknowledged',detail:'PO → POA normalized',tone:'connected'},
+    {order:'YR-1044',book:'Fault Lines',format:'Paperback',stage:'Shipped',detail:'ASN + tracking captured',tone:'connected'},
+    {order:'YR-1039',book:'Tres Amigos, Una Vida',format:'Hardcover',stage:'Invoice matched',detail:'Actual fulfillment cost reconciled',tone:'connected'},
+    {order:'YR-1031',book:'Fault Lines',format:'Hardcover',stage:'Needs attention',detail:'Provider exception held for review',tone:'future'}
+  ];
+  return `<main class="view creatorView">${pageHead('Fulfillment','Ingram truth without pretending we have an API we don’t.','v0.4 models the public Ingram retailer lifecycle — metadata, stock, purchase order, acknowledgment, pick/pack, shipment notice and invoice — behind explicit provider gates.',`<button class="btn secondary" data-nav="commerce">Commerce</button><button class="btn primary" data-nav="integrations">Connection status</button>`)}
+  <div class="shell"><div class="metricsGrid five">${metric('Queued','3','Physical items awaiting provider action','purple')}${metric('Acknowledged','12','Provider accepted','limeCard')}${metric('Shipped','18','Tracking captured')}${metric('Exceptions','1','Held from auto-retry')}${metric('Last sync','Demo','Provider transport remains off')}</div>
+  <section class="panel"><div class="panelHead"><div><span class="microLabel">INGRAM BRIDGE</span><h2>One normalized fulfillment lifecycle.</h2></div><span class="safePill">SUBMISSION OFF</span></div>
+  <div class="systemFlow"><div><span class="systemIcon">M</span><strong>Metadata</strong><p>Title, author, ISBN and cover snapshots.</p></div><i>→</i><div><span class="systemIcon">S</span><strong>Stock</strong><p>Availability and provider-cost snapshots.</p></div><i>→</i><div class="activeSystem"><span class="systemIcon">PO</span><strong>Fulfillment</strong><p>PO → POA → Pick/Pack → ASN → Invoice.</p></div></div></section>
+  <div class="twoCol dashboardMain"><section class="panel"><div class="panelHead"><div><span class="microLabel">FULFILLMENT QUEUE</span><h2>Every physical item gets its own job.</h2></div></div><div class="flowList">${jobs.map(j=>`<div><strong>${j.order} · ${esc(j.book)}</strong><span>${j.format} · ${j.stage}<br>${j.detail}</span></div>`).join('')}</div></section>
+  <section class="panel"><div class="panelHead"><div><span class="microLabel">FAIL-SAFE OPERATIONS</span><h2>Automation cannot hide failure.</h2></div></div><div class="integrationMini"><strong>Idempotent provider documents</strong><span>Duplicate POA/ASN/invoice events do not duplicate state.</span></div><div class="integrationMini"><strong>Retry ledger</strong><span>Attempts, backoff and last error stay inspectable.</span></div><div class="integrationMini"><strong>Dead-letter queue</strong><span>Unmatched or malformed provider records wait for human review.</span></div><div class="integrationMini"><strong>Cost reconciliation</strong><span>Provider invoices update actual fulfillment cost without rewriting checkout history.</span></div></section></div>
+  <section class="panel dataContract"><div><div class="microLabel">WHAT WE CAN CONNECT WHEN INGRAM APPROVES IT</div><h2>The transport is replaceable; Marketplace stays the same.</h2><p>v0.4 prepares normalized envelopes and consumes normalized provider documents. Whether Ingram gives YasReady EDI, a partner feed, Express Checkout eligibility or another approved transport, the storefront and commerce ledger do not need a rewrite.</p></div><pre>{
+  "provider": "ingram",
+  "outbound": ["purchase_order"],
+  "inbound": ["purchase_order_ack", "asn", "invoice", "exception"],
+  "feeds": ["metadata", "inventory", "sales"],
+  "liveSubmission": false
+}</pre></section></div></main>`;
 }
 
 function marketingView(){
@@ -126,7 +157,7 @@ function marketingView(){
 
 function embedCode(b){const url=`https://marketplace.yasready.com/book/${b.slug}`;return `<a href="${url}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#1d1d1f;color:#fff;text-decoration:none;font:700 15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">Buy ${b.title} on YasReady</a>`}
 
-function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','The plugs are built before we need them.','v0.3.0 separates identity, payments, fulfillment and Business analytics so none of those systems gets hard-wired into another product.')}
+function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','The plugs are built before we need them.','v0.4.0 keeps identity, payments, fulfillment and Business analytics separate while adding a contract-safe Ingram bridge.')}
 <div class="shell"><div class="integrationGrid">${integrationCard('Y','YasReady Account','Connected','The same central account used in Publishing becomes the Marketplace author identity. No second signup.','Shared identity','connected')}${integrationCard('S','Stripe Connect','Ready for test credentials','Express onboarding hooks, Checkout Sessions, webhooks, multi-seller allocation and reconciliation boundaries are in the Worker.','Payments + payouts','ready')}${integrationCard('I','Ingram','Partner-ready boundary','Share & Sell fallback plus metadata, stock, Consumer Direct Fulfillment and EDI lifecycle seams. Live fulfillment waits for an approved Ingram relationship.','Print fulfillment','ready')}${integrationCard('B','Business | YasReady','Export contract built','A normalized commercial feed already exposes gross sales, fees, fulfillment costs, author payable, formats and campaign performance.','Business intelligence','future')}</div>
 <section class="panel architecturePanel"><div class="panelHead"><div><span class="microLabel">PRODUCTION SAFETY</span><h2>Things that stay off until they’re real.</h2></div></div><div class="safetyGrid"><div><span class="offPill">OFF</span><strong>Live checkout</strong><p>`+'`CHECKOUT_ENABLED=false`'+` is the tracked default.</p></div><div><span class="offPill">OFF</span><strong>Stripe live mode</strong><p>Requires secret + webhook configuration.</p></div><div><span class="offPill">OFF</span><strong>Ingram order submission</strong><p>No undocumented API calls or fake credentials.</p></div><div><span class="offPill">OFF</span><strong>Publishing import</strong><p>Receiving table exists; handshake remains disabled.</p></div></div></section>
 <section class="panel dataContract"><div><div class="microLabel">BUSINESS HANDOFF</div><h2>Marketplace already knows the numbers Business will need.</h2><p>When Business is ready, it consumes a versioned Marketplace export instead of learning Marketplace’s internal database.</p></div><pre>{
@@ -149,12 +180,12 @@ function bookModal(b){
 
 function cartDrawer(){
   const total=state.cart.reduce((a,x)=>a+x.price,0),sellers=new Set(state.cart.map(x=>x.authorId)).size;
-  return `<div class="drawerShade" data-close-cart><aside class="cartDrawer" onclick="event.stopPropagation()"><div class="drawerHead"><div><span class="microLabel">YOUR BAG</span><h2>${state.cart.length} ${state.cart.length===1?'item':'items'}</h2></div><button data-close-cart>×</button></div>${state.cart.length?`<div class="cartItems">${state.cart.map((x,i)=>`<div class="cartItem"><div><strong>${esc(x.title)}</strong><span>${esc(x.author)} · ${esc(x.format)}</span></div><div><strong>${money(x.price)}</strong><button data-remove="${i}">Remove</button></div></div>`).join('')}</div><div class="cartSummary"><div><span>Subtotal</span><strong>${money(total)}</strong></div><div><span>Independent authors</span><strong>${sellers}</strong></div></div><button class="btn primary wide" data-demo-checkout>Continue to checkout</button><p class="cartFine">v0.3 validates edition price and seller server-side before Stripe. Stripe test checkout is wired behind server-side safety gates; live money remains intentionally disabled in this package.</p>`:`<div class="emptyCart"><strong>Your bag is empty.</strong><p>Add an edition from any Marketplace listing.</p></div>`}</aside></div>`;
+  return `<div class="drawerShade" data-close-cart><aside class="cartDrawer" onclick="event.stopPropagation()"><div class="drawerHead"><div><span class="microLabel">YOUR BAG</span><h2>${state.cart.length} ${state.cart.length===1?'item':'items'}</h2></div><button data-close-cart>×</button></div>${state.cart.length?`<div class="cartItems">${state.cart.map((x,i)=>`<div class="cartItem"><div><strong>${esc(x.title)}</strong><span>${esc(x.author)} · ${esc(x.format)}</span></div><div><strong>${money(x.price)}</strong><button data-remove="${i}">Remove</button></div></div>`).join('')}</div><div class="cartSummary"><div><span>Subtotal</span><strong>${money(total)}</strong></div><div><span>Independent authors</span><strong>${sellers}</strong></div></div><button class="btn primary wide" data-demo-checkout>Continue to checkout</button><p class="cartFine">v0.4 validates edition price and seller server-side before Stripe. Stripe test checkout is wired behind server-side safety gates; live money remains intentionally disabled in this package.</p>`:`<div class="emptyCart"><strong>Your bag is empty.</strong><p>Add an edition from any Marketplace listing.</p></div>`}</aside></div>`;
 }
 
 function render(){
-  const views={store:storeView,dashboard:dashboardView,books:booksView,sales:salesView,commerce:commerceView,marketing:marketingView,integrations:integrationsView};
-  app.innerHTML=shell()+(views[state.view]||storeView)()+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>Make it. Sell it. Understand it.</p><span>v0.3.0 · Commerce Closure</span></div></footer>`+(state.selected?bookModal(state.selected):'');
+  const views={store:storeView,dashboard:dashboardView,books:booksView,sales:salesView,commerce:commerceView,fulfillment:fulfillmentView,marketing:marketingView,integrations:integrationsView};
+  app.innerHTML=shell()+(views[state.view]||storeView)()+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>Make it. Sell it. Understand it.</p><span>v0.4.0 · Ingram Bridge</span></div></footer>`+(state.selected?bookModal(state.selected):'');
   bind();if(state.view==='marketing')setupMarketing();
 }
 
@@ -191,7 +222,7 @@ async function setupMarketing(){
   select.onchange=()=>{state.marketingBookId=select.value;render()};
   const name=document.querySelector('#campaignName'),source=document.querySelector('#campaignSource'),link=document.querySelector('#campaignLink'),canvas=document.querySelector('#qr');
   const b=state.books.find(x=>x.id===state.marketingBookId)||myBooks()[0];
-  async function update(){state.campaignName=name.value||'campaign';state.campaignSource=source.value;const medium=['instagram','facebook','tiktok'].includes(source.value)?'social':source.value==='email'?'email':source.value==='event-qr'?'offline':'referral';state.campaignMedium=medium;const url=campaignUrl(b,state.campaignName,state.campaignSource,medium);link.value=url;await QRCode.toCanvas(canvas,url,{width:250,margin:1,errorCorrectionLevel:'M'});const sl=document.querySelector('#socialLaunch'),ss=document.querySelector('#socialShort');if(sl)sl.textContent=`${b.title} by ${b.author} is available now. Choose your format and order here: ${url}`;if(ss)ss.textContent=`Read ${b.title}: ${url}`;track('marketing_asset_previewed',{type:'campaign_link',bookId:b.id,source:source.value})}
+  async function update(){state.campaignName=name.value||'campaign';state.campaignSource=source.value;const medium=['instagram','facebook','tiktok'].includes(source.value)?'social':source.value==='email'?'email':source.value==='event-qr'?'offline':'referral';state.campaignMedium=medium;const url=campaignUrl(b,state.campaignName,state.campaignSource,medium);link.value=url;await renderQr(canvas,url);const sl=document.querySelector('#socialLaunch'),ss=document.querySelector('#socialShort');if(sl)sl.textContent=`${b.title} by ${b.author} is available now. Choose your format and order here: ${url}`;if(ss)ss.textContent=`Read ${b.title}: ${url}`;track('marketing_asset_previewed',{type:'campaign_link',bookId:b.id,source:source.value})}
   name.oninput=update;source.onchange=update;await update();
   document.querySelectorAll('[data-copy]').forEach(x=>x.onclick=async()=>{const el=document.querySelector(x.dataset.copy),txt='value'in el?el.value:el.textContent;await navigator.clipboard.writeText(txt);track('marketing_asset_copied',{bookId:b.id});toast('Copied')});
   document.querySelectorAll('[data-copy-text]').forEach(x=>x.onclick=async()=>{await navigator.clipboard.writeText(decodeURIComponent(x.dataset.copyText));track('marketing_asset_copied',{type:'embed',bookId:b.id});toast('HTML copied')});
@@ -218,5 +249,5 @@ async function hydrateFromApi(){
   }catch{}
 }
 
-const pathMatch=location.pathname.match(/^\/book\/([^/]+)/);const q=new URLSearchParams(location.search);const slug=pathMatch?decodeURIComponent(pathMatch[1]):q.get('book');if(slug){const found=state.books.find(b=>b.slug===slug);if(found)state.selected=found;track('campaign_landing',{bookId:found?.id,bookSlug:slug,source:q.get('utm_source'),campaignId:q.get('yr_campaign')})}
+const pathMatch=location.pathname.match(/(?:^|\/)book\/([^/]+)\/?$/);const q=new URLSearchParams(location.search);const slug=pathMatch?decodeURIComponent(pathMatch[1]):q.get('book');if(slug){const found=state.books.find(b=>b.slug===slug);if(found)state.selected=found;track('campaign_landing',{bookId:found?.id,bookSlug:slug,source:q.get('utm_source'),campaignId:q.get('yr_campaign')})}
 render();hydrateFromApi();

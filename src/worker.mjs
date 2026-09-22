@@ -4,8 +4,11 @@ import {getIdentity,publicIdentity} from './lib/auth.mjs';
 import {buildBusinessExport} from './lib/business.mjs';
 import {buildCampaignUrl,buildEmbedHtml,socialCopy} from './lib/marketing.mjs';
 import {ingramCapabilities,buildPurchaseOrderDocument,normalizeIngramDocument} from './lib/ingram.mjs';
-import {createExpressAccount,createAccountLink,retrieveAccount,createCheckoutSession,verifyStripeSignature,createRefund,createTransfer} from './lib/stripe-server.mjs';
-import {allocateRefund,sellerBalance,refundStatus,commerceReadiness,prorateMinor} from './lib/commerce.mjs';
+import {ingramReadiness,normalizeInventoryRow,normalizeMetadataRow,normalizeInvoice,nextRetrySeconds,normalizeBridgeError,validatePhysicalOrder} from './lib/ingram-bridge.mjs';
+import {createExpressAccount,createAccountLink,retrieveAccount,createCheckoutSession,retrieveCheckoutSession,retrievePaymentIntent,verifyStripeSignature,createRefund,createTransfer} from './lib/stripe-server.mjs';
+import {allocateRefund,sellerBalance,refundStatus,commerceReadiness,prorateMinor,allocateProRata} from './lib/commerce.mjs';
+import {recordOrderStatus,openCommerceException,ensureReceiptToken,materializeSettlementAllocations,createFulfillmentJobs,refreshOrderFulfillment,listAuthorOrders,getAuthorOrder,commerceHealth,audit} from './lib/commerce-ops.mjs';
+import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -179,8 +182,8 @@ async function commerceSummary(env,authorId){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.3.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
-  if(!env.DB && path!=='/api/providers/ingram/status' && path!=='/api/providers/stripe/status') return noDb();
+  if(path==='/api/health') return json({ok:true,version:'0.4.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
   if(path.startsWith('/api/catalog/')&&request.method==='GET'){
@@ -283,6 +286,12 @@ async function api(request,env){
       const transfers=await all(env.DB.prepare(`SELECT * FROM transfer_records WHERE author_id=? ORDER BY created_at DESC LIMIT 100`).bind(author.id));
       return json({ok:true,balance:await commerceSummary(env,author.id),payouts,transfers});
     }
+    if(path==='/api/me/fulfillment/summary'&&request.method==='GET'){
+      const rows=await all(env.DB.prepare(`SELECT fj.status,COUNT(*) count FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id WHERE oi.author_id=? GROUP BY fj.status ORDER BY count DESC`).bind(author.id));
+      const exceptions=await env.DB.prepare(`SELECT COUNT(*) count FROM commerce_exceptions WHERE status='open' AND provider='ingram' AND (author_id=? OR order_id IN (SELECT order_id FROM order_items WHERE author_id=?))`).bind(author.id,author.id).first();
+      const lastSync=await env.DB.prepare(`SELECT sync_type,status,completed_at,rows_seen,rows_written,error_summary FROM provider_sync_runs WHERE provider='ingram' ORDER BY started_at DESC LIMIT 1`).first();
+      return json({ok:true,provider:'ingram',statuses:rows,openExceptions:Number(exceptions?.count||0),lastSync:lastSync||null,readiness:ingramReadiness(env)});
+    }
     if(path==='/api/me/fulfillment'&&request.method==='GET'){
       const rows=await all(env.DB.prepare(`SELECT fj.*,o.id order_id,b.title,e.format,e.isbn FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id JOIN orders o ON o.id=oi.order_id JOIN editions e ON e.id=oi.edition_id JOIN books b ON b.id=e.book_id WHERE oi.author_id=? ORDER BY fj.created_at DESC LIMIT 100`).bind(author.id));
       return json({ok:true,jobs:rows});
@@ -338,11 +347,62 @@ async function api(request,env){
     try{const tr=await createTransfer(env,{amount:Number(a.payable_minor),currency:a.currency||'usd',destination:a.stripe_connected_account_id,transferGroup:a.order_id,sourceTransaction:a.source_charge||null,metadata:{yasready_order_id:a.order_id,yasready_author_id:a.author_id,yasready_settlement_id:a.id},idempotencyKey:`transfer:${a.id}:${a.payable_minor}`});await env.DB.prepare(`INSERT INTO transfer_records (id,order_id,author_id,provider,external_transfer_id,source_transaction_id,amount_minor,reversed_minor,currency,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,external_transfer_id) DO NOTHING`).bind(uuid(),a.order_id,a.author_id,'stripe',tr.id,a.source_charge||null,Number(tr.amount||a.payable_minor),0,String(tr.currency||a.currency||'usd'),'submitted',now(),now()).run();const items=await all(env.DB.prepare(`SELECT id,seller_payable_minor FROM order_items WHERE order_id=? AND author_id=? ORDER BY created_at,id`).bind(a.order_id,a.author_id)),parts=allocateProRata(Number(tr.amount||a.payable_minor),items.map(x=>({grossMinor:Number(x.seller_payable_minor||0)})));for(let i=0;i<items.length;i++)await env.DB.prepare(`UPDATE order_items SET stripe_transfer_id=?,transferred_minor=?,updated_at=? WHERE id=?`).bind(tr.id,parts[i]||0,now(),items[i].id).run();await env.DB.prepare(`UPDATE settlement_allocations SET stripe_transfer_id=?,status='transferred',updated_at=? WHERE id=?`).bind(tr.id,now(),a.id).run();await audit(env,{actorType:'admin',action:'transfer.created',objectType:'settlement',objectId:a.id,orderId:a.order_id,metadata:{transferId:tr.id,amountMinor:tr.amount}});return json({ok:true,transferId:tr.id,amountMinor:tr.amount,status:'transferred'})}catch(err){await openCommerceException(env,{orderId:a.order_id,authorId:a.author_id,provider:'stripe',code:'transfer_failed',title:'Author transfer failed',detail:String(err.message||err),providerReference:a.id});return json({ok:false,error:'transfer_failed',message:String(err.message||err)},400)}
   }
 
+  if(path==='/api/providers/ingram/readiness'&&request.method==='GET') return json({ok:true,...ingramReadiness(env),lifecycle:['metadata','stock','purchase_order','purchase_order_ack','pick_pack','asn','invoice'],publicBasis:'Ingram CDF/EDI retailer lifecycle; transport remains agreement-specific.'});
+
+  if(path==='/api/admin/ingram/queue'&&request.method==='GET'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    const jobs=await all(env.DB.prepare(`SELECT fj.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot,e.isbn,e.provider_sku FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id LEFT JOIN editions e ON e.id=oi.edition_id WHERE fj.provider='ingram' ORDER BY CASE fj.status WHEN 'failed' THEN 0 WHEN 'queued' THEN 1 WHEN 'ready' THEN 2 ELSE 3 END,fj.created_at LIMIT 250`));
+    return json({ok:true,jobs,readiness:ingramReadiness(env)});
+  }
+
+  if(path.startsWith('/api/admin/ingram/jobs/')&&path.endsWith('/retry')&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    if(env.INGRAM_RETRY_ENABLED!=='true')return json({ok:false,error:'ingram_retry_disabled'},503);
+    const jobId=decodeURIComponent(path.slice('/api/admin/ingram/jobs/'.length,-'/retry'.length));
+    const job=await env.DB.prepare(`SELECT * FROM fulfillment_jobs WHERE id=? AND provider='ingram'`).bind(jobId).first();if(!job)return json({ok:false,error:'fulfillment_job_not_found'},404);
+    const attempt=Number(job.submission_attempts||0)+1,wait=nextRetrySeconds(attempt),next=new Date(Date.now()+wait*1000).toISOString();
+    await env.DB.prepare(`UPDATE fulfillment_jobs SET status='queued',submission_attempts=?,next_retry_at=?,last_error_code=NULL,last_error_detail=NULL,updated_at=? WHERE id=?`).bind(attempt,next,now(),jobId).run();
+    await env.DB.prepare(`INSERT INTO fulfillment_attempts (id,fulfillment_job_id,provider,attempt_number,transport,status,started_at,next_retry_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?)`).bind(uuid(),jobId,'ingram',attempt,env.INGRAM_MODE||'off','queued',now(),next,JSON.stringify({manualRetry:true})).run();
+    await audit(env,{actorType:'admin',actorId:'commerce-admin',action:'ingram.fulfillment.retry_queued',objectType:'fulfillment_job',objectId:jobId,orderId:null,metadata:{attempt,nextRetryAt:next}});
+    return json({ok:true,jobId,attempt,nextRetryAt:next});
+  }
+
+  if(path==='/api/admin/ingram/dead-letters'&&request.method==='GET'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    const rows=await all(env.DB.prepare(`SELECT * FROM provider_dead_letters WHERE provider='ingram' ORDER BY CASE status WHEN 'open' THEN 0 ELSE 1 END,last_seen_at DESC LIMIT 250`));
+    return json({ok:true,deadLetters:rows});
+  }
+
+  if(path==='/api/providers/ingram/metadata/import'&&request.method==='POST'){
+    if(env.INGRAM_METADATA_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_metadata_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
+    const body=await safeJson(request),rows=Array.isArray(body?.rows)?body.rows:[];if(!rows.length)return json({ok:false,error:'rows_required'},400);
+    const runId=uuid(),started=now();await env.DB.prepare(`INSERT INTO provider_sync_runs (id,provider,sync_type,status,started_at,rows_seen,rows_written) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','metadata_feed','running',started,rows.length,0).run();let written=0,failed=0;
+    for(const raw of rows){try{const x=normalizeMetadataRow(raw);await env.DB.prepare(`INSERT INTO provider_metadata_snapshots (id,provider,isbn,title,author,publisher,imprint,format,cover_url,publication_date,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.title,x.author,x.publisher,x.imprint,x.format,x.coverUrl,x.publicationDate,body.sourceReference||null,now(),JSON.stringify(raw)).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','metadata',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
+    await env.DB.prepare(`UPDATE provider_sync_runs SET status=?,completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(failed?'completed_with_exceptions':'completed',now(),written,failed?`${failed} rows moved to dead-letter queue`:null,runId).run();await env.DB.prepare(`INSERT INTO provider_sync_cursors (provider,sync_type,cursor_value,last_attempt_at,last_success_at,last_run_id,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider,sync_type) DO UPDATE SET cursor_value=excluded.cursor_value,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_run_id=excluded.last_run_id,updated_at=excluded.updated_at`).bind('ingram','metadata_feed',body.cursor||null,now(),now(),runId,now()).run();return json({ok:true,runId,rowsSeen:rows.length,rowsWritten:written,deadLetters:failed});
+  }
+
+  if(path==='/api/providers/ingram/inventory/import'&&request.method==='POST'){
+    if(env.INGRAM_INVENTORY_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_inventory_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
+    const body=await safeJson(request),rows=Array.isArray(body?.rows)?body.rows:[];if(!rows.length)return json({ok:false,error:'rows_required'},400);
+    const runId=uuid(),started=now();await env.DB.prepare(`INSERT INTO provider_sync_runs (id,provider,sync_type,status,started_at,rows_seen,rows_written) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','inventory_feed','running',started,rows.length,0).run();let written=0,failed=0;
+    for(const raw of rows){try{const x=normalizeInventoryRow(raw);await env.DB.prepare(`INSERT INTO provider_inventory_snapshots (id,provider,isbn,provider_sku,availability,raw_availability,on_hand,unit_cost_minor,currency,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.providerSku,x.availability,x.rawAvailability,x.onHand,x.unitCostMinor,x.currency,body.sourceReference||null,now(),JSON.stringify(raw)).run();const e=await env.DB.prepare(`SELECT id FROM editions WHERE isbn=? LIMIT 1`).bind(x.isbn).first();if(e)await env.DB.prepare(`UPDATE editions SET inventory_status=?,provider_cost_minor=COALESCE(?,provider_cost_minor),updated_at=? WHERE id=?`).bind(x.availability,x.unitCostMinor,now(),e.id).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','inventory',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
+    await env.DB.prepare(`UPDATE provider_sync_runs SET status=?,completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(failed?'completed_with_exceptions':'completed',now(),written,failed?`${failed} rows moved to dead-letter queue`:null,runId).run();await env.DB.prepare(`INSERT INTO provider_sync_cursors (provider,sync_type,cursor_value,last_attempt_at,last_success_at,last_run_id,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider,sync_type) DO UPDATE SET cursor_value=excluded.cursor_value,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_run_id=excluded.last_run_id,updated_at=excluded.updated_at`).bind('ingram','inventory_feed',body.cursor||null,now(),now(),runId,now()).run();return json({ok:true,runId,rowsSeen:rows.length,rowsWritten:written,deadLetters:failed});
+  }
+
+  if(path==='/api/providers/ingram/invoice/import'&&request.method==='POST'){
+    if(env.INGRAM_INVOICE_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_invoice_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
+    const raw=await safeJson(request);let inv;try{inv=normalizeInvoice(raw||{})}catch(err){return json({ok:false,error:'invalid_ingram_invoice',message:String(err.message||err)},400)}
+    const order=await env.DB.prepare(`SELECT * FROM orders WHERE id=?`).bind(inv.orderReference).first();if(!order)return json({ok:false,error:'order_not_found'},404);
+    const providerInvoiceId=uuid(),result=await env.DB.prepare(`INSERT OR IGNORE INTO provider_invoices (id,provider,external_invoice_id,order_id,invoice_date,currency,subtotal_minor,shipping_minor,tax_minor,total_minor,status,received_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(providerInvoiceId,'ingram',inv.invoiceId,order.id,inv.invoiceDate,inv.currency,inv.subtotalMinor,inv.shippingMinor,inv.taxMinor,inv.totalMinor,'received',now(),JSON.stringify(raw||{})).run();if(Number(result.meta?.changes||0)===0)return json({ok:true,replayed:true,invoiceId:inv.invoiceId,orderId:order.id});
+    for(const line of inv.lines){let orderItemId=line.orderItemId;if(!orderItemId&&line.isbn){const hit=await env.DB.prepare(`SELECT oi.id FROM order_items oi JOIN editions e ON e.id=oi.edition_id WHERE oi.order_id=? AND e.isbn=? LIMIT 1`).bind(order.id,line.isbn).first();orderItemId=hit?.id||null;}await env.DB.prepare(`INSERT INTO provider_invoice_lines (id,provider_invoice_id,line_number,order_item_id,isbn,quantity,amount_minor,shipping_minor,tax_minor,currency,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),providerInvoiceId,line.lineNumber,orderItemId,line.isbn,line.quantity,line.amountMinor,line.shippingMinor,line.taxMinor,line.currency,JSON.stringify(line)).run();if(orderItemId&&line.amountMinor!=null){await env.DB.prepare(`UPDATE order_items SET actual_fulfillment_cost_minor=?,updated_at=? WHERE id=?`).bind(line.amountMinor,now(),orderItemId).run();await env.DB.prepare(`INSERT INTO provider_cost_snapshots (id,provider,order_id,order_item_id,cost_type,amount_minor,currency,source_reference,captured_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',order.id,orderItemId,'invoice_fulfillment',line.amountMinor,line.currency,inv.invoiceId,now(),JSON.stringify({invoiceId:inv.invoiceId})).run();}}
+    await env.DB.prepare(`UPDATE fulfillment_jobs SET invoice_reference=?,updated_at=? WHERE id IN (SELECT fj.id FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id WHERE oi.order_id=? AND fj.provider='ingram')`).bind(inv.invoiceId,now(),order.id).run();await materializeSettlementAllocations(env,order.id);await audit(env,{actorType:'provider',actorId:'ingram',action:'ingram.invoice',objectType:'order',objectId:order.id,orderId:order.id,metadata:{invoiceId:inv.invoiceId,totalMinor:inv.totalMinor}});return json({ok:true,orderId:order.id,invoiceId:inv.invoiceId,lines:inv.lines.length});
+  }
+
   if(path==='/api/providers/ingram/fulfillment/export'&&request.method==='POST'){
     if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_export'},401);if(env.INGRAM_MODE==='off')return json({ok:false,error:'ingram_not_enabled'},503);
     const body=await safeJson(request),orderId=body?.orderId;if(!orderId)return json({ok:false,error:'order_id_required'},400);const order=await env.DB.prepare(`SELECT * FROM orders WHERE id=?`).bind(orderId).first();if(!order)return json({ok:false,error:'order_not_found'},404);if(!['paid','succeeded','partially_refunded'].includes(order.payment_status))return json({ok:false,error:'order_not_paid'},409);
     const items=await all(env.DB.prepare(`SELECT oi.id,oi.quantity,e.format,e.isbn,e.provider_sku providerSku FROM order_items oi JOIN editions e ON e.id=oi.edition_id WHERE oi.order_id=? AND oi.fulfillment_provider='ingram'`).bind(orderId)),shipTo=safeAddress(order.shipping_address_json);if(!shipTo)return json({ok:false,error:'shipping_address_missing'},409);
-    try{const document=buildPurchaseOrderDocument({order,items,shipTo,accountId:env.INGRAM_ACCOUNT_ID||null}),key=`ingram-po:${orderId}`;await env.DB.prepare(`INSERT OR IGNORE INTO provider_documents (id,provider,document_type,direction,order_id,external_document_id,idempotency_key,status,occurred_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','purchase_order','outbound',orderId,null,key,'ready',now(),JSON.stringify(document)).run();await audit(env,{actorType:'system',actorId:'ingram-bridge',action:'ingram.po.prepared',objectType:'order',objectId:orderId,orderId,metadata:{lineCount:document.lines.length}});return json({ok:true,document,transport:env.INGRAM_MODE,note:'Normalized PO envelope is ready. Transport remains partner-contract specific.'})}catch(err){return json({ok:false,error:'ingram_export_failed',message:String(err.message||err)},400)}
+    try{const validation=validatePhysicalOrder({order,items,shipTo});if(!validation.ok)return json({ok:false,error:'ingram_order_not_ready',details:validation.errors},409);const document=buildPurchaseOrderDocument({order,items,shipTo,accountId:env.INGRAM_ACCOUNT_ID||null}),key=`ingram-po:${orderId}`;await env.DB.prepare(`INSERT OR IGNORE INTO provider_documents (id,provider,document_type,direction,order_id,external_document_id,idempotency_key,status,occurred_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','purchase_order','outbound',orderId,null,key,'ready',now(),JSON.stringify(document)).run();await audit(env,{actorType:'system',actorId:'ingram-bridge',action:'ingram.po.prepared',objectType:'order',objectId:orderId,orderId,metadata:{lineCount:document.lines.length}});return json({ok:true,document,transport:env.INGRAM_MODE,note:'Normalized PO envelope is ready. Transport remains partner-contract specific.'})}catch(err){return json({ok:false,error:'ingram_export_failed',message:String(err.message||err)},400)}
   }
   if(path==='/api/providers/ingram/fulfillment/event'&&request.method==='POST'){
     if(env.INGRAM_FULFILLMENT_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_fulfillment_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
@@ -373,7 +433,7 @@ async function api(request,env){
     }catch(err){await env.DB.prepare(`UPDATE provider_sync_runs SET status='failed',completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(now(),written,String(err.message||err).slice(0,500),runId).run();return json({ok:false,error:'ingram_import_failed'},500)}
   }
 
-  if(path==='/api/providers/ingram/status') return json({ok:true,mode:env.INGRAM_MODE||'off',connected:(env.INGRAM_MODE||'off')!=='off',reportImportEnabled:env.INGRAM_REPORT_IMPORT_ENABLED==='true',fulfillmentImportEnabled:env.INGRAM_FULFILLMENT_IMPORT_ENABLED==='true',capabilities:ingramCapabilities,note:'CDF/EDI and IPS Express Checkout are modeled as eligibility/contract-gated provider paths; no private Ingram access is assumed.'});
+  if(path==='/api/providers/ingram/status') return json({ok:true,...ingramReadiness(env),capabilities:ingramCapabilities,note:'CDF/EDI, data feeds and other Ingram transports remain eligibility/contract-gated. Marketplace prepares and consumes normalized documents without assuming private Ingram endpoints.'});
   if(path==='/api/providers/stripe/status') return json({ok:true,mode:env.STRIPE_MODE||'off',checkoutEnabled:env.CHECKOUT_ENABLED==='true',capabilities:['checkout','connect_onboarding','signed_webhooks','separate_charges_transfers','refunds','disputes','payout_gates','reconciliation']});
   if(path==='/api/economics/calculate'&&request.method==='POST'){const b=await safeJson(request);return json({ok:true,...sellerPayable(b||{})});}
   return json({ok:false,error:'not_found'},404);
@@ -384,6 +444,6 @@ export default {
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.3.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.4.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

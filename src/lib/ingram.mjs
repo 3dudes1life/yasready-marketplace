@@ -2,9 +2,13 @@ export const ingramCapabilities=Object.freeze({
   shareAndSellFallback:true,
   retailerMetadataFeed:true,
   retailerInventoryFeed:true,
+  metadataFeedImport:true,
+  inventoryFeedImport:true,
   consumerDirectFulfillment:true,
   ediLifecycle:['purchase_order','purchase_order_ack','pick_pack','asn','invoice'],
   salesReportingImport:true,
+  providerInvoiceImport:true,
+  retryAndDeadLetter:true,
   ipsExpressCheckout:true,
   ipsExpressCheckoutEligibilityRequired:true,
   audiobookRoadmap:true

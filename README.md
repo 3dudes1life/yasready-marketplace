@@ -1,86 +1,97 @@
-# Marketplace | YasReady v0.3.0
+# Marketplace | YasReady v0.4.0
 
 `marketplace.yasready.com`
 
-Standalone YasReady marketplace engine for selling completed books without destabilizing Publishing | YasReady.
+Standalone YasReady marketplace engine for taking a finished indie book from **ready to sell → sold → promoted → fulfilled → measured** without destabilizing Publishing | YasReady.
 
-## The product boundary
+## Product boundary
 
 - **Publishing | YasReady** owns how a book is made.
-- **Marketplace | YasReady** owns how a book is listed, sold, promoted and commercially measured.
-- **Business | YasReady** can later consume a normalized Marketplace export without reading Marketplace internals.
+- **Marketplace | YasReady** owns how it is listed, sold, promoted, fulfilled and commercially measured.
+- **Business | YasReady** consumes a versioned commercial export later.
+- Marketplace uses the **same YasReady account identity** as Publishing; there is no second author login.
 
-Marketplace does **not** own a second password system. The same YasReady account identity used in Publishing maps to one Marketplace author profile through `authors.user_id`.
+## v0.4.0 — Ingram Bridge
 
-## v0.3.0 includes
+### Reader + author product
+- multi-format storefront and multi-author cart model
+- My Books, Sales, Commerce, **Fulfillment**, Promote and Connections workspaces
+- same-account author mapping
+- free marketing kit with tracked links, QR, embeds and ready-to-post copy
+- Business-ready marketplace analytics contract
 
-### Reader storefront
-- marketplace discovery/search/filter UI
-- one Book with multiple editions (ebook, paperback, hardcover, audiobook)
-- cart designed for multiple authors
-- server-side cart validation endpoint
-- physical/digital fulfillment provider separation
+### Commerce Closure retained
+- Stripe Connect/Checkout architecture behind explicit gates
+- webhook replay protection
+- immutable order economics snapshots
+- marketplace fee, processor fee, fulfillment cost and author payable separated
+- refunds, transfer/payout ledger, disputes and reconciliation
 
-### Author workspace
-- same-YasReady-account session contract
-- author catalog and listing state
-- sales overview and recent orders
-- format mix and attribution model
-- promotion workspace
-- trackable campaign links
-- QR generation
-- copy/paste HTML embeds and buy buttons
-- ready-to-post promotional copy
-- campaign performance table
+### Ingram Bridge
+Marketplace does not fake a private IngramSpark API. v0.4 models the publicly documented retailer integration lifecycle and leaves transport contract-specific:
 
-### Commerce plumbing
-- Stripe Connect Express onboarding hooks
-- Stripe Checkout Session adapter
-- separate-charges/transfers-friendly multi-seller allocation model
-- webhook signature verification and replay protection table
-- payment state kept separate from fulfillment state
-- item-level marketplace fee / processor / fulfillment / seller payable accounting
+- metadata feed snapshots
+- inventory/availability snapshots
+- provider-cost snapshots
+- normalized purchase-order envelope
+- PO acknowledgment / fulfillment event ingestion
+- shipment + tracking normalization
+- invoice + invoice-line ingestion
+- fulfillment attempts and bounded retry scheduling
+- dead-letter queue for records that cannot safely reconcile
+- provider sync runs + cursors for freshness
+- external Ingram sales remain a separate channel ledger
+- Share & Sell remains available as a fallback
 
-### Ingram boundary
-- Share & Sell fallback field per edition
-- metadata / inventory / Consumer Direct Fulfillment / EDI capability model
-- fulfillment request normalization
-- provider sync run table
-- no undocumented Ingram API calls
+### GitHub Pages demo fix
+The previous white page was a deployment/bootstrap problem: raw Vite source was served at a GitHub project path while the page requested `/src/main.js` from the domain root. v0.4 is safe to demo directly from the repo root on GitHub Pages and includes:
 
-### Data + future Business
-- first-class marketplace events
-- campaign attribution
-- versioned `yasready.marketplace.business.v1` export contract
-- clean money fields in minor currency units
+- relative module/bootstrap paths
+- lazy QR loading so an optional CDN failure cannot blank the storefront
+- linked source stylesheet rather than a browser-invalid CSS module import
+- guarded `import.meta.env` access
+- project-safe campaign URLs
+- `404.html` book-route fallback
+- `npm run verify:pages`
 
 ## Safety defaults
 
-Tracked defaults are deliberately off:
+All real-money/provider submission switches stay OFF:
 
 - `CHECKOUT_ENABLED=false`
 - `STRIPE_MODE=off`
+- `PAYOUTS_ENABLED=false`
+- `REFUNDS_ENABLED=false`
 - `INGRAM_MODE=off`
+- `INGRAM_SUBMISSION_ENABLED=false`
+- `INGRAM_METADATA_IMPORT_ENABLED=false`
+- `INGRAM_INVENTORY_IMPORT_ENABLED=false`
+- `INGRAM_INVOICE_IMPORT_ENABLED=false`
+- `INGRAM_REPORT_IMPORT_ENABLED=false`
+- `INGRAM_FULFILLMENT_IMPORT_ENABLED=false`
+- `INGRAM_RETRY_ENABLED=false`
 - `PUBLISHING_IMPORT_ENABLED=false`
 
-That lets the whole product run as a private-beta demo without accidentally moving money or submitting fulfillment orders.
+## GitHub Pages check
 
-## Fastest local demo
+```bash
+npm run verify:pages
+```
 
-Double-click:
+or double-click `PAGES_VERIFY.command`.
 
-`SHOWCASE.command`
+GitHub target: `https://github.com/3dudes1life/yasready-marketplace.git`
 
-or run:
+## Local app
 
 ```bash
 npm install
 npm run dev
 ```
 
-`SHOWCASE.command` opens `PREVIEW.html` immediately with no install. For the interactive Vite UI, double-click `RUN_DEMO_APP.command` or use `npm run dev`. The app has built-in demo data and does not require provider credentials.
+`SHOWCASE.command` opens the no-install preview.
 
-## Full local Worker + D1 demo
+## Full Worker + D1
 
 ```bash
 npm install
@@ -89,29 +100,14 @@ npm run db:migrate:local
 npm run cloudflare:dev
 ```
 
-Then use the local Wrangler URL. `YASREADY_AUTH_MODE=demo` maps the demo YasReady account to the seeded author profile.
-
-## Verify
-
-```bash
-npm run verify
-```
-
-## GitHub
-
-Target repository:
-
-`https://github.com/3dudes1life/yasready-marketplace.git`
-
-`GITHUB_FIRST_PUSH.command` is configured for that repo.
-
 ## Before production
 
-1. Create/bind the real Cloudflare D1 database and replace `REPLACE_AFTER_D1_CREATE`.
-2. Point Marketplace at the same OIDC/JWT identity provider as Publishing.
-3. Configure Stripe Connect in **test** mode first and certify onboarding, Checkout, webhooks, refunds and transfer reconciliation.
-4. Determine YasReady's merchant-of-record / marketplace-facilitator / tax obligations before live money.
-5. Establish the correct Ingram retailer/technical relationship before enabling CDF/EDI.
-6. Keep Publishing import disabled until Marketplace has independently passed beta testing.
+1. Bind the production D1 database.
+2. Connect the same central YasReady identity provider used by Publishing.
+3. Certify Stripe in test mode.
+4. Resolve merchant-of-record / marketplace-facilitator / tax obligations.
+5. Establish the correct Ingram retailer/technical relationship and approved transport.
+6. Turn on Ingram feed types individually and validate reconciliation before any order submission.
+7. Keep Publishing import disabled until Marketplace independently passes beta.
 
-See `docs/` for the integration contracts and partner notes.
+See `docs/INGRAM-BRIDGE.md`, `docs/GITHUB-PAGES.md`, and the remaining `docs/` contracts.

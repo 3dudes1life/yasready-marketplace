@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — Ingram Bridge
+
+- fixes GitHub Pages white-screen deployment by making the repo-root demo project-path safe
+- adds a Pages deep-link fallback and deployment verification script
+- adds a dedicated author Fulfillment workspace
+- models Ingram's public metadata → stock → EDI fulfillment lifecycle without inventing a private API
+- adds provider metadata and inventory snapshot ingestion
+- adds provider sync cursors and freshness history
+- adds invoice and invoice-line ingestion tied back to order items
+- adds fulfillment attempt history, bounded retry scheduling and dead-letter handling
+- adds admin fulfillment queue and provider-health endpoints
+- validates physical orders before purchase-order envelope preparation
+- retains Share & Sell as a fallback path
+- keeps all Ingram imports/submission/retry switches fail-closed
+- preserves Commerce Closure ledgers and Business export contract
+
 ## 0.3.0 — Marketplace Engine
 
 - shared YasReady account contract; no separate author login
