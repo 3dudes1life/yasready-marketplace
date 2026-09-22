@@ -1,15 +1,15 @@
 {
   "name": "yasready-marketplace",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "private": true,
   "type": "module",
-  "description": "Marketplace | YasReady v0.8.0 \u2014 Consumer Marketplace Closure with reader discovery, saved books, digital library entitlements, progress sync, author/series pages and YasReady. Books-ready data contracts.",
+  "description": "Marketplace | YasReady v0.9.0 \u2014 Marketing Studio with campaign assets, launch kits, short links, spend-aware attribution and actionable author growth insights.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs",
-    "verify": "npm run test && npm run verify:ui && npm run verify:catalog && npm run verify:consumer && npm run verify:style && npm run verify:pages && npm run verify:publishing && npm run build && node scripts/verify-build.mjs",
+    "verify": "npm run test && npm run verify:ui && npm run verify:catalog && npm run verify:consumer && npm run verify:marketing && npm run verify:style && npm run verify:pages && npm run verify:publishing && npm run build && node scripts/verify-build.mjs",
     "cloudflare:dev": "wrangler dev src/worker.mjs --local",
     "cloudflare:deploy": "wrangler deploy --config wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply yasready-marketplace --local",
@@ -21,7 +21,8 @@
     "verify:style": "node scripts/verify-yasready-style.mjs",
     "verify:ui": "node scripts/verify-ui-closure.mjs",
     "verify:catalog": "node scripts/verify-catalog.mjs",
-    "verify:consumer": "node scripts/verify-consumer.mjs"
+    "verify:consumer": "node scripts/verify-consumer.mjs",
+    "verify:marketing": "node scripts/verify-marketing-studio.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

@@ -130,3 +130,40 @@ test('v0.8 migration adds customer identity saved recent progress and follows',(
 test('v0.8 exposes reader library saved recent progress and follow APIs',()=>{const w=read('../src/worker.mjs');for(const token of ['/api/reader/library','/api/reader/saved','/api/reader/recent','/api/reader/progress','/api/reader/follow'])assert.match(w,new RegExp(token.replaceAll('/','\\/')))});
 test('v0.8 consumer UI includes discovery library saved author series and Books bridge',()=>{const m=read('../src/main.js');for(const token of ['consumerHero','libraryView','savedView','authorPageView','seriesPageView','YasReady. Books','Recently viewed'])assert.match(m,new RegExp(token.replace('.','\\.')))});
 test('v0.8 consumer data remains one YasReady identity',()=>{const w=read('../src/worker.mjs');assert.match(w,/ensureCustomer\(env,auth\.identity\)/);assert.match(w,/user_id=\?/)});
+
+// v0.9 Marketing Studio
+import {normalizeCampaignDraft,campaignMetrics,marketingRecommendation,launchKit,shortLinkSlug,assetPlan} from '../src/lib/marketing-studio.mjs';
+
+test('marketing studio normalizes channel and campaign objective',()=>{
+  const c=normalizeCampaignDraft({name:' Book Launch ',source:'instagram',objective:'launch',budgetMinor:4200});
+  assert.equal(c.name,'Book Launch');assert.equal(c.medium,'social');assert.equal(c.objective,'launch');assert.equal(c.budgetMinor,4200);
+});
+
+test('marketing metrics calculate conversion revenue per visit and ROAS',()=>{
+  const m=campaignMetrics({visits:100,orders:10,revenueMinor:20000,costMinor:5000,refundsMinor:2000});
+  assert.equal(m.conversionRate,10);assert.equal(m.netRevenueMinor,18000);assert.equal(m.revenuePerVisitMinor,180);assert.equal(m.roas,3.6);
+});
+
+test('marketing recommendation identifies high-converting channel',()=>{
+  const r=marketingRecommendation([{source:'event-qr',label:'Event / QR',visits:100,orders:10,revenueMinor:15000,costMinor:1000}]);
+  assert.equal(r.type,'scale_winner');assert.match(r.title,/Event/);
+});
+
+test('launch kit creates social email event and checklist assets',()=>{
+  const kit=launchKit({title:'Fault Lines',author:'William',url:'https://example.com/book',objective:'launch'});
+  assert.match(kit.social.launch,/Fault Lines/);assert.match(kit.email.body,/example.com/);assert.ok(kit.checklist.length>=5);
+});
+
+test('short link slug stays readable and bounded',()=>{
+  const slug=shortLinkSlug('Book Two Launch','ABC123XYZ');assert.match(slug,/^book-two-launch-/);assert.ok(slug.length<40);
+});
+
+test('asset plan adapts to channel',()=>{
+  assert.ok(assetPlan({source:'email',objective:'launch'}).includes('email_copy'));assert.ok(assetPlan({source:'event-qr',objective:'event'}).includes('event_card'));
+});
+
+test('v0.9 Business export carries normalized marketing intelligence',()=>{
+  const marketing={visits:100,orders:8,revenueMinor:16000,costMinor:2000,conversionRate:8,roas:8};
+  const out=buildBusinessExport({author:{id:'a',user_id:'u',display_name:'Author'},period:{days:30},totals:{currency:'usd'},marketing});
+  assert.deepEqual(out.marketing,marketing);
+});

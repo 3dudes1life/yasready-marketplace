@@ -1,5 +1,5 @@
 export const BUSINESS_EXPORT_SCHEMA='yasready.marketplace.business.v1';
-export function buildBusinessExport({author,period,totals,formats=[],campaigns=[],channels=[],generatedAt=new Date().toISOString()}){
+export function buildBusinessExport({author,period,totals,formats=[],campaigns=[],channels=[],marketing=null,generatedAt=new Date().toISOString()}){
   return {
     schema:BUSINESS_EXPORT_SCHEMA,
     generatedAt,
@@ -19,6 +19,7 @@ export function buildBusinessExport({author,period,totals,formats=[],campaigns=[
     formats,
     campaigns,
     channels,
+    marketing,
     provenance:{commercialSystem:'Marketplace | YasReady',canonicalMoneyUnit:'minor',currency:totals.currency||'usd'}
   };
 }

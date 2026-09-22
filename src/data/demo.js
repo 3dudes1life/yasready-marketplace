@@ -59,7 +59,8 @@ export const dashboard={
 };
 
 export const campaigns=[
-  {id:'camp-instagram-launch',bookId:'taul-2',name:'Book Two Launch',source:'instagram',clicks:598,orders:18,revenue:356.82},
-  {id:'camp-event-qr',bookId:'taul-1',name:'Pride Event QR',source:'event-qr',clicks:109,orders:11,revenue:207.89},
-  {id:'camp-email',bookId:'taul-2',name:'Reader Email',source:'email',clicks:186,orders:14,revenue:284.86}
+  {id:'camp-instagram-launch',bookId:'taul-2',name:'Book Two Launch',source:'instagram',objective:'launch',clicks:598,visits:598,orders:18,revenue:356.82,cost:45.00,conversion:3.01},
+  {id:'camp-event-qr',bookId:'taul-1',name:'Pride Event QR',source:'event-qr',objective:'event',clicks:109,visits:109,orders:11,revenue:207.89,cost:18.00,conversion:10.09},
+  {id:'camp-email',bookId:'taul-2',name:'Reader Email',source:'email',objective:'sales',clicks:186,visits:186,orders:14,revenue:284.86,cost:0,conversion:7.53},
+  {id:'camp-author-site',bookId:'taul-1',name:'Author Site Button',source:'author-site',objective:'evergreen',clicks:221,visits:221,orders:7,revenue:149.93,cost:0,conversion:3.17}
 ];

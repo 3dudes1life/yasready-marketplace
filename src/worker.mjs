@@ -12,6 +12,7 @@ import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mj
 import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePublishingDiff,readinessForSale,verifyPublishingSignature,slugify} from './lib/publishing-handoff.mjs';
 import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from './lib/catalog-management.mjs';
 import {normalizeReaderProgress} from './lib/consumer.mjs';
+import {normalizeCampaignDraft,campaignMetrics,marketingRecommendation,launchKit,shortLinkSlug,channelConfig} from './lib/marketing-studio.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -201,8 +202,8 @@ async function authorStats(env,authorId,days=30){
   const campaigns=await all(env.DB.prepare(`SELECT COALESCE(c.name,'Direct / unknown') campaign,COALESCE(c.source,'direct') source,COUNT(DISTINCT o.id) orders,COALESCE(SUM(oi.gross_minor),0) gross_minor FROM order_items oi JOIN orders o ON o.id=oi.order_id LEFT JOIN campaigns c ON c.id=o.campaign_id WHERE oi.author_id=? AND o.created_at>=? AND o.payment_status IN ('paid','succeeded','partially_refunded') GROUP BY c.id,c.name,c.source ORDER BY gross_minor DESC LIMIT 12`).bind(authorId,start));
   const recentOrders=await all(env.DB.prepare(`SELECT o.id,o.created_at,o.payment_status,o.fulfillment_status,o.risk_status,b.title,e.format,oi.quantity,oi.gross_minor,oi.refunded_minor,oi.seller_payable_minor,oi.transferred_minor FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN editions e ON e.id=oi.edition_id JOIN books b ON b.id=e.book_id WHERE oi.author_id=? ORDER BY o.created_at DESC LIMIT 12`).bind(authorId));
   const externalChannels=await all(env.DB.prepare(`SELECT provider,COALESCE(channel_name,provider) channel,COALESCE(SUM(quantity),0) units,COALESCE(SUM(gross_minor),0) gross_minor,COALESCE(SUM(net_minor),0) net_minor,COALESCE(SUM(returns_minor),0) returns_minor FROM external_channel_sales WHERE author_id=? AND sale_date>=? GROUP BY provider,channel_name ORDER BY gross_minor DESC`).bind(authorId,start));
-  const views=Number(viewsRow?.views||0),orders=Number(totals?.orders||0);
-  return {period:{days:Number(days)||30,start,end:now()},totals:{orders,units:Number(totals?.units||0),grossSalesMinor:Number(totals?.gross_sales_minor||0),marketplaceFeesMinor:Number(totals?.marketplace_fees_minor||0),processorFeesMinor:Number(totals?.processor_fees_minor||0),fulfillmentCostMinor:Number(totals?.fulfillment_cost_minor||0),refundsMinor:Number(totals?.refunds_minor||0),disputedMinor:Number(totals?.disputed_minor||0),transferredMinor:Number(totals?.transferred_minor||0),sellerPayableMinor:Number(totals?.seller_payable_minor||0),views,conversionRate:views?Number(((orders/views)*100).toFixed(2)):0,currency:'usd'},formats:formats.map(x=>({format:x.format,units:Number(x.units),grossMinor:Number(x.gross_minor)})),campaigns:campaigns.map(x=>({campaign:x.campaign,source:x.source,orders:Number(x.orders),grossMinor:Number(x.gross_minor)})),externalChannels:externalChannels.map(x=>({provider:x.provider,channel:x.channel,units:Number(x.units),grossMinor:Number(x.gross_minor),netMinor:Number(x.net_minor),returnsMinor:Number(x.returns_minor)})),recentOrders};
+  const views=Number(viewsRow?.views||0),orders=Number(totals?.orders||0),marketing=await authorMarketingSummary(env,authorId,start);
+  return {period:{days:Number(days)||30,start,end:now()},totals:{orders,units:Number(totals?.units||0),grossSalesMinor:Number(totals?.gross_sales_minor||0),marketplaceFeesMinor:Number(totals?.marketplace_fees_minor||0),processorFeesMinor:Number(totals?.processor_fees_minor||0),fulfillmentCostMinor:Number(totals?.fulfillment_cost_minor||0),refundsMinor:Number(totals?.refunds_minor||0),disputedMinor:Number(totals?.disputed_minor||0),transferredMinor:Number(totals?.transferred_minor||0),sellerPayableMinor:Number(totals?.seller_payable_minor||0),views,conversionRate:views?Number(((orders/views)*100).toFixed(2)):0,currency:'usd'},formats:formats.map(x=>({format:x.format,units:Number(x.units),grossMinor:Number(x.gross_minor)})),campaigns:campaigns.map(x=>({campaign:x.campaign,source:x.source,orders:Number(x.orders),grossMinor:Number(x.gross_minor)})),externalChannels:externalChannels.map(x=>({provider:x.provider,channel:x.channel,units:Number(x.units),grossMinor:Number(x.gross_minor),netMinor:Number(x.net_minor),returnsMinor:Number(x.returns_minor)})),marketing,recentOrders};
 }
 
 async function validateCart(env,rawItems){
@@ -345,9 +346,56 @@ async function authorBookReadiness(env,author,bookId){
   return {book:effectiveBook,sourceBook:book,listing,editions,readiness:readinessForSale({book:effectiveBook,listing,editions,author})};
 }
 
+
+async function marketingCampaignRows(env,authorId,bookId){
+  const campaigns=await all(env.DB.prepare(`SELECT c.*,b.title,b.slug FROM campaigns c JOIN books b ON b.id=c.book_id WHERE c.author_id=? AND c.book_id=? ORDER BY c.created_at DESC`).bind(authorId,bookId));
+  const rows=[];
+  for(const c of campaigns){
+    const visitsRow=await env.DB.prepare(`SELECT COUNT(*) visits FROM marketplace_events WHERE campaign_id=? AND event_type='campaign_landing'`).bind(c.id).first();
+    const shortRow=await env.DB.prepare(`SELECT COALESCE(SUM(click_count),0) clicks FROM marketing_short_links WHERE campaign_id=?`).bind(c.id).first();
+    const sales=await env.DB.prepare(`SELECT COUNT(DISTINCT o.id) orders,COALESCE(SUM(oi.gross_minor),0) revenue_minor,COALESCE(SUM(oi.refunded_minor),0) refunds_minor FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.campaign_id=? AND oi.author_id=? AND o.payment_status IN ('paid','succeeded','partially_refunded')`).bind(c.id,authorId).first();
+    const costs=await env.DB.prepare(`SELECT COALESCE(SUM(amount_minor),0) cost_minor FROM marketing_campaign_costs WHERE campaign_id=? AND author_id=?`).bind(c.id,authorId).first();
+    const metric=campaignMetrics({visits:Number(visitsRow?.visits||0),orders:Number(sales?.orders||0),revenueMinor:Number(sales?.revenue_minor||0),refundsMinor:Number(sales?.refunds_minor||0),costMinor:Number(costs?.cost_minor||c.budget_minor||0)});
+    rows.push({...c,clicks:Number(shortRow?.clicks||0),label:channelConfig(c.source).label,...metric});
+  }
+  return rows;
+}
+
+async function authorMarketingSummary(env,authorId,start){
+  const campaigns=await all(env.DB.prepare(`SELECT c.* FROM campaigns c WHERE c.author_id=? ORDER BY c.created_at DESC`).bind(authorId));
+  const rows=[];
+  for(const c of campaigns){
+    const visits=await env.DB.prepare(`SELECT COUNT(*) n FROM marketplace_events WHERE campaign_id=? AND event_type='campaign_landing' AND occurred_at>=?`).bind(c.id,start).first();
+    const sales=await env.DB.prepare(`SELECT COUNT(DISTINCT o.id) orders,COALESCE(SUM(oi.gross_minor),0) revenue_minor,COALESCE(SUM(oi.refunded_minor),0) refunds_minor FROM orders o JOIN order_items oi ON oi.order_id=o.id WHERE o.campaign_id=? AND oi.author_id=? AND o.created_at>=? AND o.payment_status IN ('paid','succeeded','partially_refunded')`).bind(c.id,authorId,start).first();
+    const costs=await env.DB.prepare(`SELECT COALESCE(SUM(amount_minor),0) n FROM marketing_campaign_costs WHERE campaign_id=? AND author_id=? AND occurred_at>=?`).bind(c.id,authorId,start).first();
+    rows.push({id:c.id,campaign:c.name,source:c.source,objective:c.objective||'sales',...campaignMetrics({visits:Number(visits?.n||0),orders:Number(sales?.orders||0),revenueMinor:Number(sales?.revenue_minor||0),refundsMinor:Number(sales?.refunds_minor||0),costMinor:Number(costs?.n||0)})});
+  }
+  const totals=rows.reduce((a,r)=>({visits:a.visits+r.visits,orders:a.orders+r.orders,revenueMinor:a.revenueMinor+r.netRevenueMinor,costMinor:a.costMinor+r.costMinor}),{visits:0,orders:0,revenueMinor:0,costMinor:0});
+  return {...campaignMetrics(totals),campaigns:rows,recommendation:marketingRecommendation(rows)};
+}
+
+async function marketingStudioState(env,author,bookId,origin){
+  const book=await env.DB.prepare(`SELECT b.*,COALESCE(l.display_title,b.title) display_title,COALESCE(l.cover_override_url,b.cover_url) display_cover FROM books b LEFT JOIN listings l ON l.book_id=b.id WHERE b.id=? AND b.author_id=?`).bind(bookId,author.id).first();
+  if(!book)return null;
+  const campaigns=await marketingCampaignRows(env,author.id,bookId);
+  const recommendation=marketingRecommendation(campaigns);
+  const canonical=`${origin}/book/${encodeURIComponent(book.slug)}`;
+  return {book:{id:book.id,title:book.display_title||book.title,slug:book.slug,coverUrl:book.display_cover||null},campaigns,recommendation,canonicalUrl:canonical,launchKit:launchKit({title:book.display_title||book.title,author:author.display_name,url:canonical,objective:'launch'})};
+}
+
+async function marketingShortRedirect(request,env){
+  if(!env.DB)return new Response('Not found',{status:404});
+  const url=new URL(request.url),slug=decodeURIComponent(url.pathname.slice(3));
+  const row=await env.DB.prepare(`SELECT * FROM marketing_short_links WHERE slug=? AND active=1`).bind(slug).first();
+  if(!row)return new Response('Not found',{status:404});
+  await env.DB.prepare(`UPDATE marketing_short_links SET click_count=click_count+1,last_clicked_at=? WHERE id=?`).bind(now(),row.id).run();
+  await writeEvent(env,{type:'short_link_clicked',authorId:row.author_id,bookId:row.book_id,campaignId:row.campaign_id,source:'yasready-short-link',medium:'redirect',properties:{slug}});
+  return Response.redirect(row.destination_url,302);
+}
+
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.8.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.9.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -446,11 +494,26 @@ async function api(request,env){
     if(path==='/api/me/campaigns'&&request.method==='POST'){
       const body=await safeJson(request); if(!body?.bookId||!body?.name||!body?.source) return json({ok:false,error:'book_name_source_required'},400);
       const book=await env.DB.prepare(`SELECT id,slug,title FROM books WHERE id=? AND author_id=?`).bind(body.bookId,author.id).first(); if(!book) return json({ok:false,error:'book_not_owned'},403);
-      const id=uuid(); const medium=body.medium||'referral'; const destinationPath=`/book/${book.slug}`;
-      await env.DB.prepare(`INSERT INTO campaigns (id,author_id,book_id,name,source,medium,content,destination_path,active,created_at) VALUES (?,?,?,?,?,?,?,?,1,?)`).bind(id,author.id,book.id,String(body.name).slice(0,120),String(body.source).slice(0,80),String(medium).slice(0,80),body.content?String(body.content).slice(0,120):null,destinationPath,now()).run();
-      const shareUrl=buildCampaignUrl({origin:env.PUBLIC_APP_URL||url.origin,bookSlug:book.slug,campaign:body.name,source:body.source,medium,campaignId:id});
-      await env.DB.prepare(`INSERT INTO marketing_assets (id,author_id,book_id,campaign_id,asset_type,label,config_json,created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(uuid(),author.id,book.id,id,'campaign_link',body.name,JSON.stringify({shareUrl}),now()).run();
-      return json({ok:true,campaign:{id,bookId:book.id,name:body.name,source:body.source,medium,shareUrl}},201);
+      const draft=normalizeCampaignDraft(body),id=uuid(),destinationPath=`/book/${book.slug}`;
+      await env.DB.prepare(`INSERT INTO campaigns (id,author_id,book_id,name,source,medium,content,destination_path,active,created_at,objective,budget_minor,starts_at,ends_at,status,notes) VALUES (?,?,?,?,?,?,?,?,1,?,?,?,?,?,?,?)`).bind(id,author.id,book.id,draft.name,draft.source,draft.medium,body.content?String(body.content).slice(0,120):null,destinationPath,now(),draft.objective,draft.budgetMinor,draft.startsAt,draft.endsAt,'active',draft.notes||null).run();
+      const shareUrl=buildCampaignUrl({origin:env.PUBLIC_APP_URL||url.origin,bookSlug:book.slug,campaign:draft.name,source:draft.source,medium:draft.medium,campaignId:id});
+      await env.DB.prepare(`INSERT INTO marketing_assets (id,author_id,book_id,campaign_id,asset_type,label,config_json,created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(uuid(),author.id,book.id,id,'campaign_bundle',draft.name,JSON.stringify({shareUrl,objective:draft.objective,source:draft.source,medium:draft.medium}),now()).run();
+      if(draft.budgetMinor>0) await env.DB.prepare(`INSERT INTO marketing_campaign_costs (id,author_id,campaign_id,label,amount_minor,source,occurred_at,created_at) VALUES (?,?,?,?,?,'planned_budget',?,?)`).bind(uuid(),author.id,id,'Planned campaign spend',draft.budgetMinor,now(),now()).run();
+      const kit=launchKit({title:book.title,author:author.display_name,url:shareUrl,objective:draft.objective});
+      await env.DB.prepare(`INSERT INTO marketing_launch_kits (id,author_id,book_id,campaign_id,objective,kit_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?)`).bind(uuid(),author.id,book.id,id,draft.objective,JSON.stringify(kit),now(),now()).run();
+      return json({ok:true,campaign:{id,bookId:book.id,name:draft.name,source:draft.source,medium:draft.medium,objective:draft.objective,budgetMinor:draft.budgetMinor,shareUrl},launchKit:kit},201);
+    }
+    if(path.startsWith('/api/me/marketing-studio/')&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.slice('/api/me/marketing-studio/'.length));const state=await marketingStudioState(env,author,bookId,env.PUBLIC_APP_URL||url.origin);return state?json({ok:true,...state}):json({ok:false,error:'book_not_owned'},404);
+    }
+    if(path.match(/^\/api\/me\/marketing-studio\/[^/]+\/short-links$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]),body=await safeJson(request)||{};const book=await env.DB.prepare(`SELECT id,slug FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return json({ok:false,error:'book_not_owned'},404);
+      let campaign=null;if(body.campaignId){campaign=await env.DB.prepare(`SELECT * FROM campaigns WHERE id=? AND author_id=? AND book_id=?`).bind(body.campaignId,author.id,bookId).first();if(!campaign)return json({ok:false,error:'campaign_not_owned'},403)}
+      const destination=campaign?buildCampaignUrl({origin:env.PUBLIC_APP_URL||url.origin,bookSlug:book.slug,campaign:campaign.name,source:campaign.source,medium:campaign.medium,campaignId:campaign.id}):`${env.PUBLIC_APP_URL||url.origin}/book/${encodeURIComponent(book.slug)}`;
+      const slug=shortLinkSlug(body.name||campaign?.name||book.slug,uuid());const id=uuid();await env.DB.prepare(`INSERT INTO marketing_short_links (id,author_id,book_id,campaign_id,slug,destination_url,active,created_at) VALUES (?,?,?,?,?,?,1,?)`).bind(id,author.id,bookId,campaign?.id||null,slug,destination,now()).run();return json({ok:true,link:{id,slug,url:`${env.PUBLIC_APP_URL||url.origin}/r/${slug}`,destination}},201);
+    }
+    if(path.match(/^\/api\/me\/marketing-studio\/[^/]+\/costs$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]),body=await safeJson(request)||{};const campaign=await env.DB.prepare(`SELECT c.id FROM campaigns c WHERE c.id=? AND c.author_id=? AND c.book_id=?`).bind(body.campaignId,author.id,bookId).first();if(!campaign)return json({ok:false,error:'campaign_not_owned'},403);const amount=Math.max(0,Math.round(Number(body.amountMinor)||0));if(!amount)return json({ok:false,error:'positive_amount_required'},400);const id=uuid();await env.DB.prepare(`INSERT INTO marketing_campaign_costs (id,author_id,campaign_id,label,amount_minor,source,occurred_at,created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(id,author.id,campaign.id,String(body.label||'Campaign cost').slice(0,120),amount,'manual',body.occurredAt||now(),now()).run();return json({ok:true,cost:{id,campaignId:campaign.id,amountMinor:amount}},201);
     }
     if(path.startsWith('/api/me/marketing-kit/')&&request.method==='GET'){
       const bookId=decodeURIComponent(path.slice('/api/me/marketing-kit/'.length));
@@ -473,7 +536,7 @@ async function api(request,env){
 
     if(path==='/api/me/business-export'&&request.method==='GET'){
       const stats=await authorStats(env,author.id,url.searchParams.get('days')||30);
-      const exportData=buildBusinessExport({author,period:stats.period,totals:stats.totals,formats:stats.formats,campaigns:stats.campaigns,channels:stats.externalChannels});
+      const exportData=buildBusinessExport({author,period:stats.period,totals:stats.totals,formats:stats.formats,campaigns:stats.campaigns,channels:stats.externalChannels,marketing:stats.marketing});
       return json({ok:true,export:exportData});
     }
     if(path==='/api/me/stripe/status'&&request.method==='GET'){
@@ -707,7 +770,8 @@ export default {
   async fetch(request,env){
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
+    if(url.pathname.startsWith('/r/')) return marketingShortRedirect(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.8.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.9.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };
