@@ -38,6 +38,6 @@ Example:
 
 Money remains in integer minor units so Business never has to reverse rounding done in a UI.
 
-## Why this exists in v0.2
+## Why this exists in v0.3
 
 The Marketplace is likely to become a natural acquisition funnel for Business: once an author can see what they sold and which campaign caused it, Business can add the rest of the company context (ads, editing, subscriptions, event costs, taxes, bank activity and other revenue channels).

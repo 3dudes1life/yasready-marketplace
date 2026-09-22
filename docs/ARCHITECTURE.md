@@ -1,4 +1,4 @@
-# Marketplace | YasReady — v0.2.0 architecture
+# Marketplace | YasReady — v0.3.0 architecture
 
 ## Hard product boundaries
 

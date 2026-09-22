@@ -25,7 +25,11 @@
     "MARKETPLACE_FEE_BPS": "500",
     "STRIPE_DEFAULT_COUNTRY": "US",
     "PUBLIC_APP_URL": "https://marketplace.yasready.com",
-    "PUBLISHING_IMPORT_ENABLED": "false"
+    "PUBLISHING_IMPORT_ENABLED": "false",
+    "PAYOUTS_ENABLED": "false",
+    "REFUNDS_ENABLED": "false",
+    "TRANSFERS_ENABLED": "false",
+    "INGRAM_FULFILLMENT_IMPORT_ENABLED": "false"
   },
   "d1_databases": [
     {

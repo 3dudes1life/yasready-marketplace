@@ -1,4 +1,4 @@
-# Marketplace | YasReady v0.2.0
+# Marketplace | YasReady v0.3.0
 
 `marketplace.yasready.com`
 
@@ -12,7 +12,7 @@ Standalone YasReady marketplace engine for selling completed books without desta
 
 Marketplace does **not** own a second password system. The same YasReady account identity used in Publishing maps to one Marketplace author profile through `authors.user_id`.
 
-## v0.2.0 includes
+## v0.3.0 includes
 
 ### Reader storefront
 - marketplace discovery/search/filter UI
