@@ -1,0 +1,23 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yasready-marketplace",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-21",
+  "workers_dev": true,
+  "vars": {
+    "MARKETPLACE_MODE": "demo",
+    "CHECKOUT_ENABLED": "false",
+    "STRIPE_MODE": "off",
+    "INGRAM_MODE": "off",
+    "MARKETPLACE_FEE_BPS": "500",
+    "PUBLIC_APP_URL": "https://marketplace.yasready.com"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yasready-marketplace",
+      "database_id": "REPLACE_AFTER_D1_CREATE",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
