@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.7.0 — Real Catalog & Book Management
+
+- turns My Books into a real catalog operations workspace
+- adds one working autosave draft per book instead of saving directly into the live storefront
+- adds Marketplace-owned presentation overrides so author edits never overwrite Publishing production truth
+- adds reader-facing title/subtitle, descriptions, cover override, category and excerpt controls
+- adds edition-level price and draft/live/paused controls
+- adds author storefront display name, tagline, bio and website editing
+- adds SEO title/description plus planned launch-date metadata
+- adds side-by-side live preview before apply
+- adds persisted catalog validation runs
+- adds optimistic draft revision locking for stale browser tabs
+- adds listing revision locking before apply
+- adds field-level catalog change history
+- prevents no-op apply actions from manufacturing revisions
+- updates public catalog and marketing kit to use Marketplace presentation overrides first
+- preserves the v0.6 YasReady operating shell and all earlier Publishing, Ingram, commerce, marketing and Business seams
+
 ## 0.6.0 — YasReady UI Closure
 
 - separates the public consumer storefront from the logged-in author operating shell

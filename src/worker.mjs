@@ -10,6 +10,7 @@ import {allocateRefund,sellerBalance,refundStatus,commerceReadiness,prorateMinor
 import {recordOrderStatus,openCommerceException,ensureReceiptToken,materializeSettlementAllocations,createFulfillmentJobs,refreshOrderFulfillment,listAuthorOrders,getAuthorOrder,commerceHealth,audit} from './lib/commerce-ops.mjs';
 import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mjs';
 import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePublishingDiff,readinessForSale,verifyPublishingSignature,slugify} from './lib/publishing-handoff.mjs';
+import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from './lib/catalog-management.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -71,8 +72,9 @@ function catalogFromRows(rows){
   const books=new Map();
   for(const r of rows){
     if(!books.has(r.book_id)) books.set(r.book_id,{
-      id:r.book_id,slug:r.slug,title:r.title,subtitle:r.subtitle,description:r.description,longDescription:r.long_description,coverUrl:r.cover_url,category:r.primary_category,
-      author:{id:r.author_id,name:r.author_name,handle:r.author_handle,avatarUrl:r.author_avatar_url},listing:{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at},editions:[]
+      id:r.book_id,slug:r.slug,title:r.display_title||r.title,subtitle:r.display_subtitle??r.subtitle,description:r.description_override??r.description,longDescription:r.long_description_override??r.long_description,coverUrl:r.cover_override_url??r.cover_url,category:r.category_override??r.primary_category,excerpt:r.excerpt||null,
+      author:{id:r.author_id,name:r.author_name,handle:r.author_handle,avatarUrl:r.author_avatar_url,bio:r.author_bio||null,websiteUrl:r.author_website_url||null,storefrontTagline:r.storefront_tagline||null},
+      listing:{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at,scheduledLiveAt:r.scheduled_live_at||null,revision:Number(r.editor_revision||0)},editions:[]
     });
     if(r.edition_id) books.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor,publishingSourceEditionId:r.publishing_source_edition_id,productionStatus:r.production_status,artifactRef:r.artifact_ref,artifactHash:r.artifact_hash,productionSyncedAt:r.production_synced_at});
   }
@@ -82,9 +84,9 @@ function catalogFromRows(rows){
 async function getCatalog(env,slug=null){
   const where=slug?`AND b.slug=?`:'';
   const sql=`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.long_description,b.cover_url,b.primary_category,
-    a.id author_id,a.display_name author_name,a.handle author_handle,a.avatar_url author_avatar_url,
-    l.id listing_id,l.status listing_status,l.visibility,l.published_at,
-    e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor
+    a.id author_id,a.display_name author_name,a.handle author_handle,a.avatar_url author_avatar_url,a.bio author_bio,a.website_url author_website_url,a.storefront_tagline,
+    l.id listing_id,l.status listing_status,l.visibility,l.published_at,l.scheduled_live_at,l.editor_revision,l.display_title,l.display_subtitle,l.description_override,l.long_description_override,l.cover_override_url,l.category_override,l.excerpt,
+    e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor,e.publishing_source_edition_id,e.production_status,e.artifact_ref,e.artifact_hash,e.production_synced_at
     FROM listings l JOIN books b ON b.id=l.book_id JOIN authors a ON a.id=b.author_id
     LEFT JOIN editions e ON e.book_id=b.id
     WHERE l.status='live' AND l.visibility='public' ${where}
@@ -94,16 +96,66 @@ async function getCatalog(env,slug=null){
 }
 
 async function getAuthorBooks(env,authorId){
-  const rows=await all(env.DB.prepare(`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.cover_url,b.primary_category,b.status book_status,b.publishing_source_id,b.source_revision,b.production_sync_status,b.production_synced_at,
-    l.id listing_id,l.status listing_status,l.visibility,l.published_at,l.author_approved_at,l.last_readiness_check_at,
+  const rows=await all(env.DB.prepare(`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.long_description,b.cover_url,b.primary_category,b.status book_status,b.publishing_source_id,b.source_revision,b.production_sync_status,b.production_synced_at,
+    l.id listing_id,l.status listing_status,l.visibility,l.published_at,l.author_approved_at,l.last_readiness_check_at,l.scheduled_live_at,l.editor_revision,l.display_title,l.display_subtitle,l.description_override,l.long_description_override,l.cover_override_url,l.category_override,l.excerpt,l.seo_title,l.seo_description,l.last_saved_at,
     e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor,e.publishing_source_edition_id,e.production_status,e.artifact_ref,e.artifact_hash,e.production_synced_at
     FROM books b LEFT JOIN listings l ON l.book_id=b.id LEFT JOIN editions e ON e.book_id=b.id WHERE b.author_id=? ORDER BY b.updated_at DESC,e.format`).bind(authorId));
   const grouped=new Map();
   for(const r of rows){
-    if(!grouped.has(r.book_id)) grouped.set(r.book_id,{id:r.book_id,slug:r.slug,title:r.title,subtitle:r.subtitle,description:r.description,coverUrl:r.cover_url,category:r.primary_category,status:r.book_status,publishingSourceId:r.publishing_source_id,sourceRevision:r.source_revision,productionSyncStatus:r.production_sync_status,productionSyncedAt:r.production_synced_at,listing:r.listing_id?{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at,authorApprovedAt:r.author_approved_at,lastReadinessCheckAt:r.last_readiness_check_at}:null,editions:[]});
+    if(!grouped.has(r.book_id)) grouped.set(r.book_id,{id:r.book_id,slug:r.slug,title:r.display_title||r.title,sourceTitle:r.title,subtitle:r.display_subtitle??r.subtitle,sourceSubtitle:r.subtitle,description:r.description_override??r.description,longDescription:r.long_description_override??r.long_description,coverUrl:r.cover_override_url??r.cover_url,category:r.category_override??r.primary_category,excerpt:r.excerpt||null,status:r.book_status,publishingSourceId:r.publishing_source_id,sourceRevision:r.source_revision,productionSyncStatus:r.production_sync_status,productionSyncedAt:r.production_synced_at,listing:r.listing_id?{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at,authorApprovedAt:r.author_approved_at,lastReadinessCheckAt:r.last_readiness_check_at,scheduledLiveAt:r.scheduled_live_at,editorRevision:Number(r.editor_revision||0),seoTitle:r.seo_title,seoDescription:r.seo_description,lastSavedAt:r.last_saved_at}:null,editions:[]});
     if(r.edition_id) grouped.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor,publishingSourceEditionId:r.publishing_source_edition_id,productionStatus:r.production_status,artifactRef:r.artifact_ref,artifactHash:r.artifact_hash,productionSyncedAt:r.production_synced_at});
   }
   return [...grouped.values()];
+}
+
+async function catalogEditorState(env,author,bookId){
+  const book=await env.DB.prepare(`SELECT * FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return null;
+  let listing=await env.DB.prepare(`SELECT * FROM listings WHERE book_id=?`).bind(bookId).first();
+  if(!listing){const id=uuid();await env.DB.prepare(`INSERT INTO listings (id,book_id,status,visibility,created_at,updated_at) VALUES (?,?,'draft','public',?,?)`).bind(id,bookId,now(),now()).run();listing=await env.DB.prepare(`SELECT * FROM listings WHERE id=?`).bind(id).first();}
+  const editions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=? ORDER BY format`).bind(bookId));
+  const current={book:{...book,displayTitle:listing.display_title,displaySubtitle:listing.display_subtitle,description:listing.description_override??book.description,longDescription:listing.long_description_override??book.long_description,coverUrl:listing.cover_override_url??book.cover_url,primaryCategory:listing.category_override??book.primary_category,excerpt:listing.excerpt},listing:{...listing,seoTitle:listing.seo_title,seoDescription:listing.seo_description,launchAt:listing.scheduled_live_at},author:{...author,displayName:author.display_name,websiteUrl:author.website_url,storefrontTagline:author.storefront_tagline},editions:editions.map(e=>({...e,priceMinor:Number(e.price_minor||0)}))};
+  const stored=await env.DB.prepare(`SELECT * FROM catalog_drafts WHERE book_id=? AND author_id=?`).bind(bookId,author.id).first();
+  let draft,draftRevision=0,validation=null;
+  if(stored){try{draft=JSON.parse(stored.draft_json);validation=stored.validation_json?JSON.parse(stored.validation_json):null}catch{draft=null}draftRevision=Number(stored.draft_revision||0)}
+  if(!draft) draft=normalizeCatalogDraft({},current);
+  if(!validation) validation=validateCatalogDraft(draft,{book,editions:current.editions.map(e=>({id:e.id,format:e.format,isbn:e.isbn,productionStatus:e.production_status}))});
+  return {book,listing,editions,current,draft,draftRevision,listingRevision:Number(listing.editor_revision||0),authorRevision:Number(author.profile_revision||0),validation};
+}
+
+async function saveCatalogDraft(env,author,bookId,body={}){
+  const state=await catalogEditorState(env,author,bookId);if(!state)return null;
+  const expected=body.baseDraftRevision==null?state.draftRevision:Number(body.baseDraftRevision);
+  if(expected!==state.draftRevision){const err=new Error('stale_catalog_draft');err.status=409;err.currentDraftRevision=state.draftRevision;throw err;}
+  const draft=normalizeCatalogDraft(body.draft||{},state.current);
+  const validation=validateCatalogDraft(draft,{book:state.book,editions:state.editions.map(e=>({id:e.id,format:e.format,isbn:e.isbn,productionStatus:e.production_status}))});
+  const next=state.draftRevision+1,stamp=now();
+  await env.DB.prepare(`INSERT INTO catalog_drafts (book_id,author_id,draft_revision,base_listing_revision,base_author_revision,draft_json,validation_json,status,created_at,updated_at) VALUES (?,?,?,?,?,?,?,'working',?,?) ON CONFLICT(book_id) DO UPDATE SET draft_revision=excluded.draft_revision,base_listing_revision=excluded.base_listing_revision,base_author_revision=excluded.base_author_revision,draft_json=excluded.draft_json,validation_json=excluded.validation_json,status='working',updated_at=excluded.updated_at,applied_at=NULL`).bind(bookId,author.id,next,state.listingRevision,state.authorRevision,JSON.stringify(draft),JSON.stringify(validation),stamp,stamp).run();
+  await env.DB.prepare(`INSERT INTO catalog_validation_runs (id,author_id,book_id,draft_revision,valid,errors_json,warnings_json,created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(uuid(),author.id,bookId,next,validation.valid?1:0,JSON.stringify(validation.errors),JSON.stringify(validation.warnings),stamp).run();
+  return {draft,draftRevision:next,baseListingRevision:state.listingRevision,baseAuthorRevision:state.authorRevision,validation,savedAt:stamp};
+}
+
+async function applyCatalogDraft(env,author,bookId){
+  const state=await catalogEditorState(env,author,bookId);if(!state)return null;
+  const stored=await env.DB.prepare(`SELECT * FROM catalog_drafts WHERE book_id=? AND author_id=?`).bind(bookId,author.id).first();if(!stored){const err=new Error('catalog_draft_missing');err.status=409;throw err;}
+  if(Number(stored.base_listing_revision||0)!==state.listingRevision){const err=new Error('listing_changed_since_draft');err.status=409;throw err;}
+  if(Number(stored.base_author_revision||0)!==state.authorRevision){const err=new Error('author_profile_changed_since_draft');err.status=409;throw err;}
+  const draft=JSON.parse(stored.draft_json),validation=validateCatalogDraft(draft,{book:state.book,editions:state.editions.map(e=>({id:e.id,format:e.format,isbn:e.isbn,productionStatus:e.production_status}))});
+  if(!validation.valid){const err=new Error('catalog_draft_invalid');err.status=409;err.validation=validation;throw err;}
+  const beforeDraft=normalizeCatalogDraft({},state.current),before=catalogPreview({draft:beforeDraft,productionBook:state.book,productionEditions:state.editions});
+  const after=catalogPreview({draft,productionBook:state.book,productionEditions:state.editions});
+  const changed=changedCatalogFields(beforeDraft,draft),stamp=now();
+  if(!changed.length){await env.DB.prepare(`UPDATE catalog_drafts SET status='applied',applied_at=?,updated_at=? WHERE book_id=?`).bind(stamp,stamp,bookId).run();return {revision:state.listingRevision,changedFields:[],validation,preview:after,appliedAt:stamp,noOp:true};}
+  const nextRevision=state.listingRevision+1,authorChanged=changed.some(x=>x.startsWith('author.')),nextAuthorRevision=state.authorRevision+(authorChanged?1:0);
+  const statements=[
+    env.DB.prepare(`UPDATE listings SET display_title=?,display_subtitle=?,description_override=?,long_description_override=?,cover_override_url=?,category_override=?,excerpt=?,visibility=?,seo_title=?,seo_description=?,scheduled_live_at=?,editor_revision=?,last_saved_at=?,updated_at=? WHERE book_id=?`).bind(draft.book.displayTitle,draft.book.displaySubtitle,draft.book.description,draft.book.longDescription,draft.book.coverUrl,draft.book.primaryCategory,draft.book.excerpt,draft.listing.visibility,draft.listing.seoTitle,draft.listing.seoDescription,draft.listing.launchAt,nextRevision,stamp,stamp,bookId),
+    env.DB.prepare(`UPDATE catalog_drafts SET status='applied',applied_at=?,base_listing_revision=?,base_author_revision=?,updated_at=? WHERE book_id=?`).bind(stamp,nextRevision,nextAuthorRevision,stamp,bookId),
+    env.DB.prepare(`INSERT INTO catalog_change_history (id,author_id,book_id,listing_revision,change_type,changed_fields_json,before_json,after_json,created_at) VALUES (?,?,?,?,?,?,?,?,?)`).bind(uuid(),author.id,bookId,nextRevision,'author_apply',JSON.stringify(changed),JSON.stringify(beforeDraft),JSON.stringify(draft),stamp)
+  ];
+  if(authorChanged) statements.push(env.DB.prepare(`UPDATE authors SET display_name=?,bio=?,website_url=?,storefront_tagline=?,profile_revision=?,updated_at=? WHERE id=?`).bind(draft.author.displayName,draft.author.bio,draft.author.websiteUrl,draft.author.storefrontTagline,nextAuthorRevision,stamp,author.id));
+  for(const e of draft.editions) statements.push(env.DB.prepare(`UPDATE editions SET price_minor=?,status=?,updated_at=? WHERE id=? AND book_id=?`).bind(e.priceMinor,e.status,stamp,e.id,bookId));
+  await env.DB.batch(statements);
+  await audit(env,{actorType:'author',actorId:author.id,action:'catalog.draft_applied',objectType:'book',objectId:bookId,metadata:{revision:nextRevision,changedFields:changed}});
+  return {revision:nextRevision,authorRevision:nextAuthorRevision,changedFields:changed,validation,preview:after,appliedAt:stamp};
 }
 
 function periodStart(days){const d=new Date();d.setUTCDate(d.getUTCDate()-Math.max(1,Math.min(365,Number(days)||30)));return d.toISOString();}
@@ -256,12 +308,13 @@ async function applyPublishingHandoff(env,raw,rawText){
 async function authorBookReadiness(env,author,bookId){
   const book=await env.DB.prepare(`SELECT * FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first(); if(!book) return null;
   const listing=await env.DB.prepare(`SELECT * FROM listings WHERE book_id=?`).bind(bookId).first(); const editions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=? ORDER BY format`).bind(bookId));
-  return {book,listing,editions,readiness:readinessForSale({book,listing,editions,author})};
+  const effectiveBook={...book,title:listing?.display_title||book.title,cover_url:listing?.cover_override_url||book.cover_url};
+  return {book:effectiveBook,sourceBook:book,listing,editions,readiness:readinessForSale({book:effectiveBook,listing,editions,author})};
 }
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.6.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.7.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -283,7 +336,7 @@ async function api(request,env){
 
   if(path==='/api/session'&&request.method==='GET'){
     const auth=await requireIdentity(request,env); if(auth.response) return auth.response; const author=await ensureAuthor(env,auth.identity);
-    return json({ok:true,identity:publicIdentity(auth.identity),author:{id:author.id,displayName:author.display_name,email:author.email,handle:author.handle,avatarUrl:author.avatar_url,stripeOnboardingStatus:author.stripe_onboarding_status,marketplaceStatus:author.marketplace_status},sharedAccount:true});
+    return json({ok:true,identity:publicIdentity(auth.identity),author:{id:author.id,displayName:author.display_name,email:author.email,handle:author.handle,avatarUrl:author.avatar_url,bio:author.bio,websiteUrl:author.website_url,storefrontTagline:author.storefront_tagline,stripeOnboardingStatus:author.stripe_onboarding_status,marketplaceStatus:author.marketplace_status},sharedAccount:true});
   }
 
   if(path.startsWith('/api/me/')){
@@ -294,6 +347,25 @@ async function api(request,env){
       return json({ok:true,author,books,stats,sharedIdentity:publicIdentity(auth.identity)});
     }
     if(path==='/api/me/books'&&request.method==='GET') return json({ok:true,books:await getAuthorBooks(env,author.id)});
+    if(path.match(/^\/api\/me\/books\/[^/]+\/editor$/)&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.split('/')[4]),state=await catalogEditorState(env,author,bookId);if(!state)return json({ok:false,error:'book_not_owned'},404);
+      return json({ok:true,bookId,draft:state.draft,draftRevision:state.draftRevision,listingRevision:state.listingRevision,authorRevision:state.authorRevision,validation:state.validation,production:{title:state.book.title,subtitle:state.book.subtitle,coverUrl:state.book.cover_url,primaryCategory:state.book.primary_category},editions:state.editions.map(e=>({id:e.id,format:e.format,isbn:e.isbn,productionStatus:e.production_status,fulfillmentProvider:e.fulfillment_provider}))});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/editor$/)&&request.method==='PATCH'){
+      const bookId=decodeURIComponent(path.split('/')[4]),body=await safeJson(request)||{};
+      try{const saved=await saveCatalogDraft(env,author,bookId,body);if(!saved)return json({ok:false,error:'book_not_owned'},404);return json({ok:true,bookId,...saved})}catch(err){return json({ok:false,error:String(err.message||err),currentDraftRevision:err.currentDraftRevision??null,validation:err.validation??null},err.status||400)}
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/preview$/)&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.split('/')[4]),state=await catalogEditorState(env,author,bookId);if(!state)return json({ok:false,error:'book_not_owned'},404);
+      return json({ok:true,bookId,preview:catalogPreview({draft:state.draft,productionBook:state.book,productionEditions:state.editions}),validation:state.validation,draftRevision:state.draftRevision});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/apply-draft$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]);try{const applied=await applyCatalogDraft(env,author,bookId);if(!applied)return json({ok:false,error:'book_not_owned'},404);return json({ok:true,bookId,...applied})}catch(err){return json({ok:false,error:String(err.message||err),validation:err.validation??null},err.status||400)}
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/history$/)&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.split('/')[4]),owned=await env.DB.prepare(`SELECT id FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!owned)return json({ok:false,error:'book_not_owned'},404);
+      const rows=await all(env.DB.prepare(`SELECT id,listing_revision,change_type,changed_fields_json,created_at FROM catalog_change_history WHERE book_id=? AND author_id=? ORDER BY created_at DESC LIMIT 100`).bind(bookId,author.id));return json({ok:true,bookId,history:rows.map(r=>({...r,changedFields:JSON.parse(r.changed_fields_json||'[]')}))});
+    }
     if(path==='/api/me/stats'&&request.method==='GET') return json({ok:true,...await authorStats(env,author.id,url.searchParams.get('days')||30)});
 
     if(path==='/api/me/campaigns'&&request.method==='GET'){
@@ -311,10 +383,10 @@ async function api(request,env){
     }
     if(path.startsWith('/api/me/marketing-kit/')&&request.method==='GET'){
       const bookId=decodeURIComponent(path.slice('/api/me/marketing-kit/'.length));
-      const book=await env.DB.prepare(`SELECT b.*,a.display_name author_name FROM books b JOIN authors a ON a.id=b.author_id WHERE b.id=? AND b.author_id=?`).bind(bookId,author.id).first(); if(!book) return json({ok:false,error:'book_not_owned'},404);
-      const canonical=`${env.PUBLIC_APP_URL||url.origin}/book/${encodeURIComponent(book.slug)}`;
-      const embed=buildEmbedHtml({url:canonical,title:book.title,author:book.author_name,coverUrl:book.cover_url||'',priceLabel:'See formats'});
-      return json({ok:true,book:{id:book.id,title:book.title,slug:book.slug},canonicalUrl:canonical,embedHtml:embed,socialCopy:socialCopy({title:book.title,author:book.author_name,url:canonical}),assetTypes:['canonical_link','campaign_link','qr_code','html_book_card','buy_button','social_copy','email_copy']});
+      const book=await env.DB.prepare(`SELECT b.*,a.display_name author_name,l.display_title,l.cover_override_url FROM books b JOIN authors a ON a.id=b.author_id LEFT JOIN listings l ON l.book_id=b.id WHERE b.id=? AND b.author_id=?`).bind(bookId,author.id).first(); if(!book) return json({ok:false,error:'book_not_owned'},404);
+      const title=book.display_title||book.title,coverUrl=book.cover_override_url||book.cover_url||'',canonical=`${env.PUBLIC_APP_URL||url.origin}/book/${encodeURIComponent(book.slug)}`;
+      const embed=buildEmbedHtml({url:canonical,title,author:book.author_name,coverUrl,priceLabel:'See formats'});
+      return json({ok:true,book:{id:book.id,title,slug:book.slug},canonicalUrl:canonical,embedHtml:embed,socialCopy:socialCopy({title,author:book.author_name,url:canonical}),assetTypes:['canonical_link','campaign_link','qr_code','html_book_card','buy_button','social_copy','email_copy']});
     }
     if(path==='/api/me/orders'&&request.method==='GET') return json({ok:true,orders:await listAuthorOrders(env,author.id,{limit:url.searchParams.get('limit')||50})});
     if(path.startsWith('/api/me/orders/')&&request.method==='GET'){
@@ -565,6 +637,6 @@ export default {
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.6.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.7.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

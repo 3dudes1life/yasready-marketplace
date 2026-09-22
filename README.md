@@ -1,137 +1,118 @@
-# Marketplace | YasReady v0.6.0
+# Marketplace | YasReady v0.7.0
 
-`marketplace.yasready.com`
+**Real Catalog & Book Management**
 
-Standalone YasReady marketplace engine for taking a finished indie book from **made → sellable → sold → promoted → fulfilled → measured** without destabilizing Publishing | YasReady.
+Marketplace remains a standalone YasReady product/repository for `marketplace.yasready.com`. v0.7 turns **My Books** into a real author operating workspace while preserving the one-way Publishing boundary established in v0.5 and the YasReady shell closed in v0.6.
 
-## v0.6.0 — YasReady UI Closure
+## What changed in v0.7
 
-v0.6 is intentionally a **visual/system closure release**, not another feature pile-on. The goal is to make Marketplace feel like a native YasReady product everywhere authors work while keeping the public bookstore clean and consumer-friendly.
+Authors can now open a full catalog editor for a book and manage the commercial layer without editing Publishing production truth.
 
-### Two experiences, one product
+### Catalog editor
 
-**Public Marketplace** stays simple for readers:
+- reader-facing title and subtitle overrides
+- short and full descriptions
+- optional storefront cover override URL
+- category and excerpt / preview copy
+- public, direct-link or private visibility
+- per-edition price
+- per-edition draft / live / paused availability
+- author storefront display name, tagline, bio and website
+- SEO title and description
+- planned launch date metadata
+- live preview beside the editor
 
-- compact consumer header
-- browse / search / format filters
-- book-first cards and format pricing
-- bag + storefront actions
-- responsive mobile storefront
+The preview updates while the author edits. ISBN, format, production status and fulfillment provider are intentionally displayed as production-owned/locked information.
 
-**Author workspace** now uses the YasReady operating shell:
+### Autosave without changing the live store
 
-- persistent left navigation rail on desktop
-- grouped `Workspace`, `Grow`, and `Operations` modules
-- compact top utility bar
-- same YasReady account identity
-- shared light/dark appearance preference
-- Ready Lime status semantics
-- YasReady green operating actions
-- denser Apple-style cards, forms, tables and metrics
-- mobile author navigation when the rail disappears
+v0.7 does **not** autosave directly into the live listing. Each book has one working `catalog_draft`.
 
-The public storefront and the author operating system no longer compete for the same navigation pattern.
+- edits debounce into an autosave
+- draft revisions protect against stale browser tabs
+- the live listing has its own revision number
+- the author previews the draft before applying it
+- `Apply changes` performs validation and atomically updates Marketplace-owned fields
+- a stale draft cannot overwrite a newer live revision
+- a no-op apply does not create a fake revision
 
-### Exact shared mark
+### Change history and validation provenance
 
-The shell now uses the actual YasReady `Y.` mark asset instead of a Marketplace-specific SVG approximation. The same optimized mark is shipped at the repo root for GitHub Pages and under `public/` for the Vite/Cloudflare build.
+Every applied revision records which commercial fields changed. Validation results are also stored separately, so Marketplace can explain why a draft was or was not ready instead of recomputing history later.
 
-### UI states are first-class
+### Publishing stays protected
 
-v0.6 adds a shared visual grammar for:
+Publishing still owns:
 
-- loading
-- skeleton data
-- empty results
-- safe error messaging
-- responsive layout
-- focus states
-- reduced-motion accessibility
+- ISBN
+- edition format
+- production artifact reference/hash
+- production status
+- provider identifiers
+- original source metadata and revision
 
-The app can grow without inventing a new visual treatment for every future feature.
+Marketplace stores reader-facing presentation as overrides on the listing. A Publishing sync can continue updating production truth without silently replacing Marketplace price or commercial presentation choices.
 
-## Product boundary
+## API added in v0.7
 
-- **Publishing | YasReady** owns how a book is made.
-- **Marketplace | YasReady** owns how it is listed, priced, sold, promoted, fulfilled and commercially measured.
-- **Business | YasReady** consumes a versioned commercial export later.
-- Marketplace uses the **same YasReady account identity** as Publishing; there is no second author login.
+- `GET /api/me/books/:bookId/editor`
+- `PATCH /api/me/books/:bookId/editor`
+- `GET /api/me/books/:bookId/preview`
+- `POST /api/me/books/:bookId/apply-draft`
+- `GET /api/me/books/:bookId/history`
 
-## Publishing Handshake retained from v0.5
+See `docs/CATALOG-MANAGEMENT.md` for the ownership and concurrency contract.
 
-Publishing can send a completed-production package to:
+## Database
 
-`POST /api/integrations/publishing/handoff`
+New migration: `0009_catalog_management.sql`
 
-The endpoint remains disabled by default and requires a timestamped HMAC signature plus the shared schema:
+It adds Marketplace presentation override fields plus:
 
-`yasready.publishing.marketplace.v1`
+- `catalog_drafts`
+- `catalog_change_history`
+- `catalog_validation_runs`
 
-Publishing may sync production truth such as title metadata, cover provenance, formats, ISBNs and production artifact references. Marketplace-owned commercial truth — sale price after first import, visibility, campaigns, orders and launch state — stays under Marketplace/author control.
+Fresh migration replay now produces **55 application tables**.
 
-A handoff creates or updates a **draft**. Publishing cannot put a title on sale. The author must pass readiness and explicitly approve go-live.
+## YasReady product boundaries retained
 
-## Commerce, Ingram, marketing and Business architecture retained
+**Publishing | YasReady** → production truth and finished book assets  
+**Marketplace | YasReady** → storefront, catalog, commerce, promotion, fulfillment and commercial analytics  
+**Business | YasReady** → future company-wide intelligence consumer
 
-- multi-format storefront and multi-author cart model
-- Stripe Checkout + Connect test architecture behind safety gates
-- immutable payment / refund / transfer ledgers
-- Ingram metadata, inventory, PO/document, shipment, invoice, retry and dead-letter bridge
-- tracked links, QR codes, HTML embeds and promo copy
-- marketplace stats + Business-ready export contract
-- same-user Publishing → Marketplace ownership mapping
+The same central YasReady user identity maps into Marketplace; there is still no second author password/account.
 
-## Safety defaults
+## Safety defaults retained
 
-All real-money/provider/source integration switches remain OFF:
+Live money, Stripe live mode, automatic refunds/transfers, Ingram submission/import paths and Publishing transport remain fail-closed unless explicitly configured. v0.7 does not loosen any provider safety gate.
 
-- `CHECKOUT_ENABLED=false`
-- `STRIPE_MODE=off`
-- `PAYOUTS_ENABLED=false`
-- `REFUNDS_ENABLED=false`
-- `INGRAM_MODE=off`
-- `INGRAM_SUBMISSION_ENABLED=false`
-- `INGRAM_METADATA_IMPORT_ENABLED=false`
-- `INGRAM_INVENTORY_IMPORT_ENABLED=false`
-- `INGRAM_INVOICE_IMPORT_ENABLED=false`
-- `INGRAM_REPORT_IMPORT_ENABLED=false`
-- `INGRAM_FULFILLMENT_IMPORT_ENABLED=false`
-- `INGRAM_RETRY_ENABLED=false`
-- `PUBLISHING_IMPORT_ENABLED=false`
+## Quick showcase
 
-## Verify v0.6
+Double-click:
+
+```bash
+SHOWCASE.command
+```
+
+This opens the no-install v0.7 catalog-management preview.
+
+## Verification
 
 ```bash
 npm test
+npm run verify:catalog
 npm run verify:ui
 npm run verify:style
 npm run verify:pages
 npm run verify:publishing
 ```
 
-Or double-click:
-
-`UI_CLOSURE_VERIFY.command`
-
-`SHOWCASE.command` opens the no-install v0.6 author-workspace preview.
-
-## GitHub / local
-
-GitHub target: `https://github.com/3dudes1life/yasready-marketplace.git`
+Full local verification after installing dependencies:
 
 ```bash
 npm install
-npm run dev
+npm run verify
 ```
 
-## Before production
-
-1. Bind production D1 and apply all migrations.
-2. Connect the same central YasReady OIDC provider used by Publishing.
-3. Certify Stripe in test mode and resolve marketplace/tax/MoR obligations.
-4. Establish the approved Ingram technical relationship and transport.
-5. Keep `PUBLISHING_IMPORT_ENABLED=false` until the Publishing sender is deliberately connected.
-6. Dry-run a real Publishing handoff and inspect field provenance.
-7. Keep author go-live approval as a separate Marketplace action.
-
-See `docs/PUBLISHING-HANDSHAKE.md`, `docs/INGRAM-BRIDGE.md`, `docs/COMMERCE-CLOSURE.md`, and the remaining contracts under `docs/`.
+The repository remains configured for `3dudes1life/yasready-marketplace` and the eventual production domain `marketplace.yasready.com`.

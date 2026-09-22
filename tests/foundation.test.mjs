@@ -66,3 +66,56 @@ test('v0.6 keeps author content clear of the fixed navigation rails',()=>{const 
 test('v0.6 has explicit loading and error UI states',()=>{const main=read('../src/main.js'),css=read('../src/styles.css');assert.match(main,/function loadingState/);assert.match(main,/function errorState/);assert.match(css,/\.stateSpinner/);assert.match(css,/\.skeletonGrid/)});
 test('v0.6 keeps mobile author navigation usable without the desktop rail',()=>{const css=read('../src/styles.css');assert.match(css,/@media\(max-width:860px\)/);assert.match(css,/\.yrSidebar\{display:none\}/);assert.match(css,/\.yrMobileNav\{position:fixed;display:flex/)});
 test('v0.6 preserves shared YasReady theme preference and Ready Lime semantics',()=>{const main=read('../src/main.js'),css=read('../src/styles.css');assert.match(main,/yasready-theme/);assert.match(css,/--yr-brand:#C6FF00/);assert.match(css,/moneyLock[^}]*var\(--yr-brand\)/s)});
+
+import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from '../src/lib/catalog-management.mjs';
+
+test('v0.7 catalog draft only accepts editions already owned by the book',()=>{
+  const current={book:{title:'Book'},listing:{visibility:'public'},author:{display_name:'Author'},editions:[{id:'e1',price_minor:999,status:'draft'}]};
+  const d=normalizeCatalogDraft({book:{displayTitle:'Reader Title'},editions:[{id:'e1',priceMinor:1299,status:'live'}]},current);
+  assert.equal(d.book.displayTitle,'Reader Title');assert.equal(d.editions[0].priceMinor,1299);
+  assert.throws(()=>normalizeCatalogDraft({editions:[{id:'other',priceMinor:100,status:'live'}]},current),/edition_not_owned/);
+});
+
+test('v0.7 catalog validation blocks live zero-price editions and bad websites',()=>{
+  const d={book:{displayTitle:'Book',coverUrl:'https://example.com/cover.jpg',description:'x',primaryCategory:'Fiction'},listing:{visibility:'public'},author:{displayName:'Author',websiteUrl:'not-a-url'},editions:[{id:'e1',priceMinor:0,status:'live'}]};
+  const v=validateCatalogDraft(d,{editions:[{id:'e1',format:'ebook',productionStatus:'ready'}]});
+  assert.equal(v.valid,false);assert.ok(v.errors.includes('author_website_invalid'));assert.ok(v.errors.includes('price_required:e1'));
+});
+
+test('v0.7 catalog preview overlays Marketplace presentation on Publishing truth',()=>{
+  const p=catalogPreview({draft:{book:{displayTitle:'Store Title',description:'Store copy'},listing:{visibility:'direct'},author:{displayName:'A'},editions:[{id:'e1',priceMinor:1299,status:'live'}]},productionBook:{title:'Production Title',cover_url:'cover.jpg'},productionEditions:[{id:'e1',format:'paperback',isbn:'9781',production_status:'ready'}]});
+  assert.equal(p.title,'Store Title');assert.equal(p.coverUrl,'cover.jpg');assert.equal(p.editions[0].isbn,'9781');assert.equal(p.visibility,'direct');
+});
+
+test('v0.7 catalog field diff is explicit for audit history',()=>{
+  const fields=changedCatalogFields({book:{displayTitle:'Old'},listing:{visibility:'public'}},{book:{displayTitle:'New'},listing:{visibility:'direct'}});
+  assert.deepEqual(fields,['book.displayTitle','listing.visibility']);
+});
+
+test('v0.7 migration adds autosave, presentation overrides and catalog audit tables',()=>{
+  const sql=read('../migrations/0009_catalog_management.sql');
+  for(const token of ['catalog_drafts','catalog_change_history','catalog_validation_runs','display_title','cover_override_url','editor_revision']) assert.match(sql,new RegExp(token));
+});
+
+test('v0.7 worker exposes editor autosave preview apply and history routes',()=>{
+  const w=read('../src/worker.mjs');for(const token of ['/editor','/preview','/apply-draft','/history','stale_catalog_draft','listing_changed_since_draft'])assert.match(w,new RegExp(token.replaceAll('/','\\/')));
+});
+
+test('v0.7 author UI exposes real catalog editor and preview-before-apply',()=>{
+  const m=read('../src/main.js');for(const token of ['data-edit-catalog','catalogEditorModal','saveCatalogEditor','applyCatalogEditor','LIVE PREVIEW','Production fields locked'])assert.match(m,new RegExp(token));
+});
+
+test('v0.7 public catalog resolves Marketplace presentation overrides first',()=>{
+  const w=read('../src/worker.mjs');assert.match(w,/display_title\|\|r\.title/);assert.match(w,/cover_override_url\?\?r\.cover_url/);assert.match(w,/description_override\?\?r\.description/);
+});
+
+test('v0.7 shared author storefront has its own concurrency revision',()=>{
+  const sql=read('../migrations/0009_catalog_management.sql'),w=read('../src/worker.mjs');assert.match(sql,/profile_revision/);assert.match(sql,/base_author_revision/);assert.match(w,/author_profile_changed_since_draft/);
+});
+
+test('v0.7 blocks unsafe catalog cover URLs before apply',()=>{
+  const d={book:{displayTitle:'Book',coverUrl:'javascript:bad',description:'x',primaryCategory:'Fiction'},listing:{visibility:'public'},author:{displayName:'Author'},editions:[{id:'e1',priceMinor:999,status:'live'}]};
+  const v=validateCatalogDraft(d,{editions:[{id:'e1',format:'ebook',productionStatus:'ready'}]});assert.equal(v.valid,false);assert.ok(v.errors.includes('cover_url_invalid'));
+});
+
+test('v0.7 no-op draft apply does not manufacture a listing revision',()=>{assert.match(read('../src/worker.mjs'),/noOp:true/)});

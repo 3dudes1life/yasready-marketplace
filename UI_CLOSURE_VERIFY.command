@@ -1,5 +1,5 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")"
-echo "Marketplace | YasReady v0.6.0 — UI Closure verification"
+echo "Marketplace | YasReady v0.7.0 — UI Closure verification"
 node scripts/verify-ui-closure.mjs

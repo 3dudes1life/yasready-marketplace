@@ -1,94 +1,100 @@
-# Marketplace | YasReady v0.6.0 — Build Report
+# Marketplace | YasReady v0.7.0 — Build Report
 
 ## Result
 
-**PASS — YasReady UI Closure package is ready for repository upload and demo.**
+**PASS — Real Catalog & Book Management package is ready for repository upload and demo.**
 
-v0.6 deliberately avoids another major feature expansion. It closes the structural UI gap between Marketplace and the wider YasReady platform while preserving the existing Publishing, commerce, Ingram, marketing and analytics architecture.
+v0.7 turns the My Books area into an actual author catalog workspace while preserving the v0.6 YasReady visual system and the production/commercial ownership boundary established by the Publishing Handshake.
 
 ## Verification completed
 
 - `node --check src/main.js` — PASS
 - `node --check src/worker.mjs` — PASS
-- `node --check src/lib/publishing-handoff.mjs` — PASS
-- `npm test` — **47/47 PASS**
-- `npm run verify:ui` — **20/20 PASS**
-- `npm run verify:style` — **16/16 PASS**
-- `npm run verify:pages` — **7/7 PASS**
-- `npm run verify:publishing` — **8/8 PASS**
-- fresh SQLite migration replay — **8/8 migrations PASS**
-- fresh schema after migrations — **52 application tables**
-- local static smoke: root HTML, shared YasReady mark and `src/main.js` — PASS
+- `node --check src/lib/catalog-management.mjs` — PASS
+- `node --test tests/foundation.test.mjs` — **58/58 PASS**
+- `node scripts/verify-catalog.mjs` — **16/16 PASS**
+- `node scripts/verify-ui-closure.mjs` — **20/20 PASS**
+- `node scripts/verify-yasready-style.mjs` — **16/16 PASS**
+- `node scripts/verify-pages.mjs` — **7/7 PASS**
+- `node scripts/verify-publishing.mjs` — **8/8 PASS**
+- fresh SQLite migration replay — **9/9 migrations PASS**
+- fresh schema after migrations — **55 application tables**
+- static HTTP smoke for `/`, `/src/main.js`, `/src/styles.css`, `/yasready-mark.png`, `/PREVIEW.html` — PASS
 
-## UI Closure
+## Catalog Management closure
 
-### Public Marketplace
+### Working drafts
 
-Readers now get a deliberately simple consumer shell:
+Autosave no longer writes directly into the live Marketplace listing. Each book gets one working `catalog_draft`, with a separate draft revision and the live listing revision it was based on.
 
-- compact Marketplace | YasReady header
-- Browse / author entry points
-- bag + appearance controls
-- book-first discovery surfaces
-- quieter cards and reduced dashboard-like chrome
-- responsive single-column mobile behavior
+A stale browser tab receives a conflict instead of overwriting a newer draft. Applying a draft also fails if the live listing changed since that draft was based on it.
 
-### Author workspace
+### Shared author-profile concurrency
 
-Authors now enter a dedicated YasReady operating environment:
+The author storefront profile is shared across every book, so v0.7 gives it its own `profile_revision`. A draft created from Book One cannot silently overwrite a newer author bio/storefront profile saved from Book Two.
 
-- fixed left rail on desktop
-- grouped **Workspace / Grow / Operations** navigation
-- compact top utility bar
-- environment state
-- live-money safety signal
-- bag, appearance and account controls
-- storefront return action
-- mobile workspace navigation below 860px
+### Production truth vs commercial presentation
 
-The author interface no longer tries to fit nine operational modules into the public storefront navigation.
+Publishing remains authoritative for production data such as ISBN, format, artifacts, production status and provider IDs.
 
-## Brand/system closure
+Marketplace now stores reader-facing presentation as listing overrides:
 
-- exact shared YasReady `Y.` image asset replaces the custom Marketplace SVG approximation
-- Ready Lime `#C6FF00` stays a readiness/status signal
-- YasReady green `#16815c` remains the operating/action accent
-- same `yasready-theme` preference contract
-- shared light/dark surfaces
-- tighter YasReady radii and information density
-- consistent table, form, panel, modal and drawer treatments
-- focus-visible and reduced-motion behavior retained
+- display title / subtitle
+- short and long description
+- optional cover override URL
+- category
+- excerpt
+- visibility
+- SEO title / description
+- planned launch date metadata
 
-## First-class UI states
+Edition price and commercial status remain Marketplace-owned.
 
-v0.6 introduces reusable:
+### Preview + validation
 
-- loading state
-- skeleton cards
-- safe error state
-- mobile operating navigation
+The editor includes a side-by-side reader preview. Draft validation checks required reader-facing data, live edition prices, physical ISBN requirements, production readiness and URL safety before an author can apply the draft.
 
-These are intentionally part of the core UI system so later catalog/reader/commerce features do not invent their own visual language.
+Validation runs are persisted separately for provenance.
 
-## Architecture retained unchanged
+### Audit history
 
-v0.6 adds **no database migration** and does not change the core money/provider contracts. It retains:
+Every applied catalog revision writes a `catalog_change_history` row with the changed field paths plus before/after snapshots. No-op applies return without manufacturing a new listing revision.
 
-- one shared YasReady author identity
-- v0.5 signed Publishing Handshake + explicit author go-live gate
-- v0.4 Ingram metadata / stock / document / shipment / invoice / retry / dead-letter bridge
-- v0.3 immutable commerce, refund and transfer ledgers
-- multi-author allocation model
-- marketing attribution, QR and embed infrastructure
-- versioned Business | YasReady export
-- GitHub Pages-safe source bootstrap
-- fail-closed Stripe, Ingram and Publishing switches
+## APIs added
+
+- `GET /api/me/books/:bookId/editor`
+- `PATCH /api/me/books/:bookId/editor`
+- `GET /api/me/books/:bookId/preview`
+- `POST /api/me/books/:bookId/apply-draft`
+- `GET /api/me/books/:bookId/history`
+
+## UI added
+
+- My Books catalog summary
+- revision indicators
+- Edit Listing action
+- full-screen YasReady catalog editor
+- autosave state
+- reader-facing live preview
+- edition price + availability controls
+- author storefront profile controls
+- SEO/discovery controls
+- recent revision history
+- responsive mobile editor behavior
+
+`PREVIEW.html` was rebuilt around the v0.7 Catalog Editor so `SHOWCASE.command` demonstrates this release rather than the old v0.6 home dashboard.
+
+## Safety retained
+
+v0.7 does not loosen any production action gate. Live money, Stripe live mode, automatic refunds/transfers, Ingram submission/imports and Publishing transport remain fail-closed by default.
+
+The planned launch date in v0.7 is stored metadata only; no scheduler automatically publishes a book.
 
 ## Production bundle limitation in this environment
 
-The Vite production bundle is **not claimed as verified** because `node_modules` / Vite are not installed in this runtime. The source, engine, Pages, Publishing, visual-system and migration checks above are verified independently.
+The Vite production bundle is **not claimed as verified** because this runtime does not contain the npm dependencies / Vite installation. Source syntax, engine behavior, catalog contracts, Pages deployment shape, Publishing contract, visual system and the complete database migration chain were verified independently above.
 
-Run locally after dependency installation:
+Run locally after installing dependencies:
 
 ```bash
 npm install
