@@ -1,83 +1,56 @@
-# Marketplace | YasReady v0.10.0
+# Marketplace | YasReady v0.11.0
 
-**Analytics Brain**
+**Stripe Test Commerce Closure + hidden YasReady. Books app bridge**
 
-Marketplace | YasReady is the commerce, discovery, promotion and reader-entitlement layer that sits after Publishing | YasReady. v0.10 keeps the v0.6 YasReady operating shell, v0.7 catalog editor, v0.8 consumer/library foundation and v0.9 Marketing Studio, then adds an explainable analytics layer for authors.
+v0.11 keeps every layer from v0.10, then closes two important loops:
 
-## What is new in 0.10.0
+1. **Commerce can now be certified as an end-to-end Stripe test system** instead of merely having Stripe-shaped code paths.
+2. **A paid ebook/audiobook becomes a durable reader entitlement** that the future YasReady. Books app can consume without inventing another library later.
 
-### Analytics Brain workspace
+## The Books app decision is now architectural
 
-A new **Insights** workspace compares the current period with the immediately preceding comparable period and highlights the small number of things that deserve attention instead of making authors interpret a wall of charts.
+Marketplace is the canonical source for what a reader owns, saved/recent books, followed authors, ebook/audiobook progress, entitlement grant/revocation, future digital asset manifests, and reader order history.
 
-It covers:
+The future **YasReady. Books** app gets a hidden, versioned API contract (`yasready.books.marketplace.v1`) and uses the same YasReady identity. There is no second app login or second purchase database.
 
-- gross Marketplace sales
-- orders, units, listing views and conversion
-- period-over-period movement
-- tracked direct-sale contribution and contribution margin
-- refunds and fulfillment-cost pressure
-- format mix and concentration
-- book-level direct-sale economics
-- campaign spend, conversion and ROAS signals
-- daily trend direction and unusual spikes/drops
-- dismissible evidence-based YasReady Signals
+The bridge is built but fail-closed by default: `BOOKS_APP_BRIDGE_ENABLED=false`, `BOOKS_APP_DELIVERY_ENABLED=false`, and `BOOKS_APP_PUSH_ENABLED=false`.
 
-### Contribution is deliberately not called net profit
+## Buy → Library loop
 
-Marketplace only knows Marketplace selling costs. v0.10 calculates:
+Successful Stripe checkout/PaymentIntent events now reconcile paid ebook/audiobook order items into `customer_entitlements`. A fully refunded digital item can revoke the entitlement without rewriting purchase history. A reader who bought as a guest can later sign into the same YasReady email and claim that prior customer record instead of creating a duplicate Library.
 
-`gross - refunds - Marketplace fee - processor fees - fulfillment - tracked campaign spend`
+## Books app API reserved now
 
-The UI labels that value **Tracked contribution**. Full-company profit belongs in Business | YasReady, where editing, design, software, payroll, tax and other expenses can be included.
+- `GET /api/books-app/v1/bootstrap`
+- `GET /api/books-app/v1/library`
+- `POST /api/books-app/v1/devices`
+- `GET /api/books-app/v1/sync?since=<cursor>`
+- `PATCH /api/books-app/v1/progress/:editionId`
+- `GET /api/books-app/v1/content/:editionId/manifest`
 
-### Business-ready intelligence
+Content delivery itself remains off until storage/signing is implemented.
 
-`GET /api/me/business-export` now carries a normalized analytics object in addition to sales, format, channel and Marketing Studio data. This preserves the architecture:
+## Stripe Test Commerce Closure
 
-**Publishing | YasReady → Marketplace | YasReady → Business | YasReady**
+v0.11 models an eight-scenario certification run: single-author checkout, multi-author checkout, signed webhook replay, digital entitlement grant, Connect onboarding, refund reconciliation, transfer ceiling, and dispute hold.
 
-## New API surface
-
-- `GET /api/me/analytics-brain?days=30`
-- `POST /api/me/analytics-brain/refresh?days=30`
-- `POST /api/me/analytics-signals/:key/dismiss`
-
-## New persistence
-
-Migration `0012_analytics_brain.sql` adds:
-
-- `analytics_brain_runs`
-- `analytics_signal_state`
-- `analytics_daily_rollups`
-
-The daily-rollup table is reserved as a future cache/aggregation layer; the current brain can still compute from canonical commerce/events data.
+Admin operations: `GET /api/admin/commerce/readiness`, `POST /api/admin/commerce/test-runs`, and `POST /api/admin/commerce/test-runs/:id/complete`.
 
 ## Existing product layers preserved
 
-- shared YasReady identity; no second author login
-- Publishing handoff with author-controlled go-live gate
-- real catalog drafts/autosave/history
-- public discovery + author/series storefronts
-- saved/recent/library/progress data for future **YasReady. Books**
-- Marketing Studio campaign links, QR, embeds, launch kits, spend and attribution
-- Stripe/Connect test architecture
-- Ingram bridge + fail-closed provider operations
-- Business export seam
+YasReady UI Closure, real catalog management, consumer Marketplace/library, Marketing Studio, Analytics Brain, Publishing handshake, Ingram bridge, Stripe settlement/refund/dispute architecture, and the Business export seam all remain intact.
 
 ## Quick preview
 
-Double-click:
-
-`SHOWCASE.command`
-
-This opens the no-install v0.10 Analytics Brain preview.
+Double-click `SHOWCASE.command`.
 
 ## Local verification
 
 ```bash
 npm install
 npm run test
+npm run verify:books
+npm run verify:stripe-test
 npm run verify:analytics
 npm run verify:ui
 npm run verify:catalog
@@ -89,4 +62,4 @@ npm run verify:publishing
 npm run build
 ```
 
-Live checkout, payouts, refunds, Ingram submission and Publishing import remain fail-closed until intentionally configured.
+Live checkout, payouts, refunds, Ingram submission, Publishing transport and Books content delivery remain disabled until deliberately configured.

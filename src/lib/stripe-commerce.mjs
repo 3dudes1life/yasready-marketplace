@@ -1,5 +1,6 @@
 import {ensureReceiptToken,materializeSettlementAllocations,createFulfillmentJobs,recordOrderStatus,openCommerceException,audit} from './commerce-ops.mjs';
 import {allocateProRata} from './commerce.mjs';
+import {syncDigitalEntitlementsForOrder,reconcileDigitalEntitlementsForOrder} from './books-app.mjs';
 const uuid=()=>crypto.randomUUID();
 const now=()=>new Date().toISOString();
 async function all(stmt){const r=await stmt.all();return r.results||[];}
@@ -23,14 +24,15 @@ async function handleCheckoutPaid(env,event,obj){
   const order=await env.DB.prepare(`SELECT * FROM orders WHERE id=?`).bind(orderId).first(); if(!order) return {handled:false,reason:'order_not_found'};
   const paymentStatus=(obj.payment_status==='paid'||event.type==='checkout.session.async_payment_succeeded')?'paid':'authorized';
   const shipping=obj?.shipping_details||obj?.collected_information?.shipping_details||null, address=shipping?.address||null, paymentIntent=typeof obj.payment_intent==='string'?obj.payment_intent:null;
-  await ensureCustomer(env,obj,orderId);
+  const customer=await ensureCustomer(env,obj,orderId);
   await env.DB.prepare(`UPDATE orders SET payment_status=?,paid_at=CASE WHEN ?='paid' THEN COALESCE(paid_at,?) ELSE paid_at END,stripe_payment_intent_id=COALESCE(stripe_payment_intent_id,?),checkout_provider='stripe',checkout_provider_reference=COALESCE(checkout_provider_reference,?),customer_email=COALESCE(customer_email,?),customer_name=COALESCE(customer_name,?),shipping_name=COALESCE(shipping_name,?),shipping_phone=COALESCE(shipping_phone,?),shipping_address_json=COALESCE(shipping_address_json,?),subtotal_minor=COALESCE(?,subtotal_minor),total_minor=COALESCE(?,total_minor),tax_minor=COALESCE(?,tax_minor),shipping_minor=COALESCE(?,shipping_minor),discount_minor=COALESCE(?,discount_minor),provider_amount_subtotal_minor=COALESCE(?,provider_amount_subtotal_minor),provider_amount_total_minor=COALESCE(?,provider_amount_total_minor),provider_tax_minor=COALESCE(?,provider_tax_minor),provider_shipping_minor=COALESCE(?,provider_shipping_minor),provider_discount_minor=COALESCE(?,provider_discount_minor),updated_at=? WHERE id=?`)
     .bind(paymentStatus,paymentStatus,now(),paymentIntent,obj.id,obj?.customer_details?.email||null,obj?.customer_details?.name||null,shipping?.name||null,obj?.customer_details?.phone||null,address?JSON.stringify(address):null,obj.amount_subtotal??null,obj.amount_total??null,obj?.total_details?.amount_tax??null,obj?.shipping_cost?.amount_total??null,obj?.total_details?.amount_discount??null,obj.amount_subtotal??null,obj.amount_total??null,obj?.total_details?.amount_tax??null,obj?.shipping_cost?.amount_total??null,obj?.total_details?.amount_discount??null,now(),orderId).run();
   if(order.payment_status!==paymentStatus) await recordOrderStatus(env,{orderId,statusType:'payment',fromStatus:order.payment_status,toStatus:paymentStatus,source:'stripe',sourceReference:event.id});
   const token=await ensureReceiptToken(env,orderId);
   await materializeSettlementAllocations(env,orderId); const jobs=paymentStatus==='paid'?await createFulfillmentJobs(env,orderId):0;
+  const digitalEntitlements=paymentStatus==='paid'?await syncDigitalEntitlementsForOrder(env,orderId):{granted:0};
   if(paymentIntent) await queueJob(env,{type:'stripe_reconcile_payment',orderId,key:`stripe-payment-reconcile:${paymentIntent}`,payload:{paymentIntent,checkoutSessionId:obj.id}});
-  await writeMarketplaceEvent(env,{type:paymentStatus==='paid'?'payment_succeeded':'payment_authorized',orderId,properties:{provider:'stripe',externalEventId:event.id,fulfillmentJobsCreated:jobs,receiptReady:true}});
+  await writeMarketplaceEvent(env,{type:paymentStatus==='paid'?'payment_succeeded':'payment_authorized',orderId,properties:{provider:'stripe',externalEventId:event.id,fulfillmentJobsCreated:jobs,digitalEntitlementsGranted:digitalEntitlements.granted,receiptReady:true}});
   return {handled:true,orderId,receiptToken:token};
 }
 
@@ -42,7 +44,7 @@ async function handlePaymentIntent(env,event,obj){
   if(order.payment_status!==status) await recordOrderStatus(env,{orderId,statusType:'payment',fromStatus:order.payment_status,toStatus:status,source:'stripe',sourceReference:event.id});
   if(status==='paid'){
     await env.DB.prepare(`INSERT INTO payment_records (id,order_id,provider,external_payment_id,external_charge_id,balance_transaction_id,amount_minor,fee_minor,net_minor,currency,status,livemode,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,external_payment_id) DO UPDATE SET external_charge_id=COALESCE(excluded.external_charge_id,payment_records.external_charge_id),amount_minor=excluded.amount_minor,status=excluded.status,updated_at=excluded.updated_at`).bind(uuid(),orderId,'stripe',obj.id,typeof obj.latest_charge==='string'?obj.latest_charge:null,null,Number(obj.amount_received||obj.amount||0),null,null,String(obj.currency||order.currency||'usd'),obj.status||'succeeded',event.livemode?1:0,now(),now()).run();
-    await ensureReceiptToken(env,orderId); await materializeSettlementAllocations(env,orderId); await createFulfillmentJobs(env,orderId);
+    await ensureReceiptToken(env,orderId); await materializeSettlementAllocations(env,orderId); await createFulfillmentJobs(env,orderId); await syncDigitalEntitlementsForOrder(env,orderId);
     await queueJob(env,{type:'stripe_reconcile_payment',orderId,key:`stripe-payment-reconcile:${obj.id}`,payload:{paymentIntent:obj.id,latestCharge:typeof obj.latest_charge==='string'?obj.latest_charge:null}});
   }else await openCommerceException(env,{orderId,provider:'stripe',code:'payment_failed',title:'Payment failed',detail:obj?.last_payment_error?.message||'Stripe reported a failed payment.',providerReference:event.id});
   return {handled:true,orderId};
@@ -70,7 +72,8 @@ async function handleRefund(env,event,obj){
   await queueJob(env,{type:'stripe_refund_reconcile',orderId,key:`stripe-refund-reconcile:${refundId}`,payload:{refundId,amountMinor:amount}});
   const settlements=await materializeSettlementAllocations(env,orderId);
   for(const settlement of settlements){const transferred=await env.DB.prepare(`SELECT COALESCE(SUM(amount_minor-reversed_minor),0) amount FROM transfer_records WHERE order_id=? AND author_id=? AND provider='stripe'`).bind(orderId,settlement.author_id).first();const over=Math.max(0,Number(transferred?.amount||0)-Number(settlement.payable_minor||0));if(over>0){await queueJob(env,{type:'stripe_transfer_reversal_review',orderId,key:`stripe-transfer-reversal-review:${refundId}:${settlement.author_id}`,payload:{refundId,authorId:settlement.author_id,recoveryMinor:over}});await openCommerceException(env,{orderId,authorId:settlement.author_id,provider:'stripe',code:'transfer_reversal_required',title:'Transferred author funds need refund recovery',detail:`A refund reduced seller payable below funds already transferred by ${over} minor units.`,providerReference:refundId,metadata:{recoveryMinor:over}});}}
-  await writeMarketplaceEvent(env,{type:'refund_changed',orderId,properties:{refundId,amountMinor:amount,status:obj.status}}); return {handled:true,orderId};
+  const entitlementResult=await reconcileDigitalEntitlementsForOrder(env,orderId);
+  await writeMarketplaceEvent(env,{type:'refund_changed',orderId,properties:{refundId,amountMinor:amount,status:obj.status,digitalEntitlementsRevoked:entitlementResult.revoked}}); return {handled:true,orderId};
 }
 
 async function handleChargeRefunded(env,event,obj){const orderId=await findOrderByPayment(env,obj);if(!orderId)return {handled:false,reason:'order_not_found'};await queueJob(env,{type:'stripe_refund_reconcile',orderId,key:`stripe-charge-refund-reconcile:${obj.id}:${obj.amount_refunded||0}`,payload:{chargeId:obj.id,amountRefundedMinor:Number(obj.amount_refunded||0)}});return {handled:true,orderId,aggregateOnly:true};}

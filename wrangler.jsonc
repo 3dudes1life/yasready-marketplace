@@ -35,7 +35,12 @@
     "PAYOUTS_ENABLED": "false",
     "REFUNDS_ENABLED": "false",
     "TRANSFERS_ENABLED": "false",
-    "INGRAM_FULFILLMENT_IMPORT_ENABLED": "false"
+    "INGRAM_FULFILLMENT_IMPORT_ENABLED": "false",
+    "BOOKS_APP_BRIDGE_ENABLED": "false",
+    "BOOKS_APP_DELIVERY_ENABLED": "false",
+    "BOOKS_APP_PUSH_ENABLED": "false",
+    "BOOKS_APP_MIN_VERSION": "0.1.0",
+    "BOOKS_APP_SCHEME": "yasreadybooks"
   },
   "d1_databases": [
     {

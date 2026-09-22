@@ -1,15 +1,15 @@
 {
   "name": "yasready-marketplace",
-  "version": "0.10.0",
+  "version": "0.11.0",
   "private": true,
   "type": "module",
-  "description": "Marketplace | YasReady v0.10.0 \u2014 Analytics Brain with comparative performance, contribution economics, trend detection, anomalies and evidence-based author signals.",
+  "description": "Marketplace | YasReady v0.11.0 \u2014 Stripe Test Commerce Closure with a hidden YasReady. Books app bridge for entitlements, library sync, progress and future content delivery.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
     "test": "node --test tests/*.test.mjs",
-    "verify": "npm run test && npm run verify:ui && npm run verify:catalog && npm run verify:consumer && npm run verify:marketing && npm run verify:analytics && npm run verify:style && npm run verify:pages && npm run verify:publishing && npm run build && node scripts/verify-build.mjs",
+    "verify": "npm run test && npm run verify:ui && npm run verify:catalog && npm run verify:consumer && npm run verify:marketing && npm run verify:analytics && npm run verify:books && npm run verify:stripe-test && npm run verify:style && npm run verify:pages && npm run verify:publishing && npm run build && node scripts/verify-build.mjs",
     "cloudflare:dev": "wrangler dev src/worker.mjs --local",
     "cloudflare:deploy": "wrangler deploy --config wrangler.jsonc",
     "db:migrate:local": "wrangler d1 migrations apply yasready-marketplace --local",
@@ -23,7 +23,9 @@
     "verify:catalog": "node scripts/verify-catalog.mjs",
     "verify:consumer": "node scripts/verify-consumer.mjs",
     "verify:marketing": "node scripts/verify-marketing-studio.mjs",
-    "verify:analytics": "node scripts/verify-analytics-brain.mjs"
+    "verify:analytics": "node scripts/verify-analytics-brain.mjs",
+    "verify:books": "node scripts/verify-books-app.mjs",
+    "verify:stripe-test": "node scripts/verify-stripe-test.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

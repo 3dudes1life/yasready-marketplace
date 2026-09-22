@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const pkg=JSON.parse(read('package.json')),main=read('src/main.js'),worker=read('src/worker.mjs'),css=read('src/styles.css'),sql=read('migrations/0012_analytics_brain.sql'),engine=read('src/lib/analytics-brain.mjs'),business=read('src/lib/business.mjs');
 const checks=[
- ['package version is 0.10.0',()=>assert.equal(pkg.version,'0.10.0')],
- ['Analytics Brain release label exists',()=>assert.match(main,/v0\.10\.0 · Analytics Brain/)],
+ ['package version is 0.11.0',()=>assert.equal(pkg.version,'0.11.0')],
+ ['Analytics Brain release label exists',()=>assert.match(main,/v0\.11\.0/)],
  ['Insights is a first-class workspace route',()=>assert.match(main,/\['insights','Insights'\]/)],
  ['Analytics Brain UI exists',()=>assert.match(main,/function insightsView/)],
  ['period comparison UI exists',()=>assert.match(main,/PERIOD COMPARISON/)],

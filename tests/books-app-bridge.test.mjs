@@ -1,0 +1,16 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+import {BOOKS_APP_CONTRACT,booksAppCapabilities,normalizeBooksDevice,booksDeepLinks,normalizeBooksProgressPatch,stripeDigitalEntitlementDecision} from '../src/lib/books-app.mjs';
+const read=p=>fs.readFileSync(new URL(p,import.meta.url),'utf8');
+test('v0.11 Books app contract is versioned',()=>assert.equal(BOOKS_APP_CONTRACT,'yasready.books.marketplace.v1'));
+test('v0.11 Books bridge stays fail closed by default',()=>{const c=booksAppCapabilities({});assert.equal(c.bridgeEnabled,false);assert.equal(c.deliveryEnabled,false);assert.equal(c.pushEnabled,false)});
+test('v0.11 Books supports ebook and audiobook only',()=>assert.deepEqual(booksAppCapabilities({}).supportedFormats,['ebook','audiobook']));
+test('v0.11 app device normalization rejects missing install id',()=>assert.throws(()=>normalizeBooksDevice({platform:'ios'}),/installation_id_invalid/));
+test('v0.11 deep links provide web and future app routes',()=>{const x=booksDeepLinks({bookSlug:'fault-lines',editionId:'e1',action:'read'});assert.match(x.web,/fault-lines/);assert.match(x.app,/^yasreadybooks:\/\/book\/fault-lines/)});
+test('v0.11 progress supports optimistic revision',()=>{const p=normalizeBooksProgressPatch({kind:'ebook',percent:42,expectedRevision:3,deviceId:'iphone'});assert.equal(p.expectedRevision,3);assert.equal(p.percent,42)});
+test('v0.11 digital entitlement grants only paid digital items',()=>{assert.equal(stripeDigitalEntitlementDecision({format:'ebook',paymentStatus:'paid',grossMinor:599,refundedMinor:0}),'grant');assert.equal(stripeDigitalEntitlementDecision({format:'paperback',paymentStatus:'paid',grossMinor:1699}),'none')});
+test('v0.11 fully refunded digital item revokes',()=>assert.equal(stripeDigitalEntitlementDecision({format:'audiobook',paymentStatus:'partially_refunded',grossMinor:999,refundedMinor:999}),'revoke'));
+test('v0.11 migration creates app bridge tables and progress revision',()=>{const s=read('../migrations/0013_stripe_test_books_app.sql');for(const x of ['digital_assets','books_app_devices','books_app_changes','commerce_test_runs','revision INTEGER'])assert.match(s,new RegExp(x))});
+test('v0.11 worker exposes protected Books app API',()=>{const w=read('../src/worker.mjs');for(const x of ['/api/books-app/v1/bootstrap','/api/books-app/v1/sync','/api/books-app/v1/devices','BOOKS_APP_BRIDGE_ENABLED'])assert.ok(w.includes(x));assert.ok(w.includes('books-app\\/v1\\/progress'));assert.ok(w.includes('\\/manifest'))});
+test('v0.11 guest checkout can be claimed by same YasReady email',()=>{const w=read('../src/worker.mjs');assert.match(w,/user_id IS NULL AND lower\(email\)=lower\(\?\)/);assert.match(w,/user_id=COALESCE\(user_id,\?\)/)});
+test('v0.11 Stripe success grants digital entitlements',()=>{const s=read('../src/lib/stripe-commerce.mjs');assert.match(s,/syncDigitalEntitlementsForOrder/);assert.match(s,/digitalEntitlementsGranted/)});
+test('v0.11 Stripe refunds reconcile digital entitlements',()=>assert.match(read('../src/lib/stripe-commerce.mjs'),/reconcileDigitalEntitlementsForOrder/));

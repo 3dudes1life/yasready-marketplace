@@ -12,6 +12,8 @@ import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mj
 import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePublishingDiff,readinessForSale,verifyPublishingSignature,slugify} from './lib/publishing-handoff.mjs';
 import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from './lib/catalog-management.mjs';
 import {normalizeReaderProgress} from './lib/consumer.mjs';
+import {BOOKS_APP_CONTRACT,booksAppCapabilities,normalizeBooksDevice,normalizeBooksProgressPatch,booksDeepLinks,recordBooksAppChange,booksAppContentManifest} from './lib/books-app.mjs';
+import {STRIPE_TEST_SCENARIOS,stripeTestReadiness,evaluateStripeTestRun} from './lib/stripe-test-cert.mjs';
 import {normalizeCampaignDraft,campaignMetrics,marketingRecommendation,launchKit,shortLinkSlug,channelConfig} from './lib/marketing-studio.mjs';
 import {buildAnalyticsBrain,subtractStats,subtractFormats} from './lib/analytics-brain.mjs';
 
@@ -20,7 +22,7 @@ const safeJson=async request=>{try{return await request.json()}catch{return null
 const uuid=()=>crypto.randomUUID();
 const now=()=>new Date().toISOString();
 const clampQty=n=>Math.max(1,Math.min(25,Number(n)||1));
-const READER_ROUTES=['/api/reader/library','/api/reader/saved','/api/reader/recent','/api/reader/progress/:editionId','/api/reader/follow/:authorId'];
+const READER_ROUTES=['/api/reader/library','/api/reader/orders','/api/reader/saved','/api/reader/recent','/api/reader/progress/:editionId','/api/reader/follow/:authorId'];
 
 function requireAdmin(request,env){
   const secret=request.headers.get('x-yasready-admin-secret')||request.headers.get('authorization')?.replace(/^Bearer\s+/i,'');
@@ -88,12 +90,14 @@ function catalogFromRows(rows){
 
 async function ensureCustomer(env,identity){
   let customer=await env.DB.prepare(`SELECT * FROM customers WHERE user_id=? LIMIT 1`).bind(identity.userId).first();
+  // Claim a prior guest checkout by verified YasReady email instead of creating a second reader record.
+  if(!customer&&identity.email) customer=await env.DB.prepare(`SELECT * FROM customers WHERE user_id IS NULL AND lower(email)=lower(?) ORDER BY created_at DESC LIMIT 1`).bind(identity.email).first();
   if(!customer){
     const id=uuid();
     await env.DB.prepare(`INSERT INTO customers (id,user_id,email,display_name,avatar_url,last_seen_at,created_at) VALUES (?,?,?,?,?,?,?)`).bind(id,identity.userId,identity.email||null,identity.name||'YasReady Reader',identity.avatarUrl||null,now(),now()).run();
     customer=await env.DB.prepare(`SELECT * FROM customers WHERE id=?`).bind(id).first();
   }else{
-    await env.DB.prepare(`UPDATE customers SET email=COALESCE(?,email),display_name=COALESCE(?,display_name),avatar_url=COALESCE(?,avatar_url),last_seen_at=? WHERE id=?`).bind(identity.email||null,identity.name||null,identity.avatarUrl||null,now(),customer.id).run();
+    await env.DB.prepare(`UPDATE customers SET user_id=COALESCE(user_id,?),email=COALESCE(?,email),display_name=COALESCE(?,display_name),avatar_url=COALESCE(?,avatar_url),last_seen_at=? WHERE id=?`).bind(identity.userId,identity.email||null,identity.name||null,identity.avatarUrl||null,now(),customer.id).run();
     customer=await env.DB.prepare(`SELECT * FROM customers WHERE id=?`).bind(customer.id).first();
   }
   return customer;
@@ -427,7 +431,7 @@ async function marketingShortRedirect(request,env){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.10.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.11.0',commerce:commerceReadiness(env),stripeTest:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -458,34 +462,82 @@ async function api(request,env){
     return json({ok:true,identity:publicIdentity(auth.identity),author:{id:author.id,displayName:author.display_name,email:author.email,handle:author.handle,avatarUrl:author.avatar_url,bio:author.bio,websiteUrl:author.website_url,storefrontTagline:author.storefront_tagline,stripeOnboardingStatus:author.stripe_onboarding_status,marketplaceStatus:author.marketplace_status},sharedAccount:true});
   }
 
+  // Hidden contract for the future YasReady. Books app. Same YasReady identity; no app-owned password system.
+  if(path.startsWith('/api/books-app/v1/')){
+    if(env.BOOKS_APP_BRIDGE_ENABLED!=='true') return json({ok:false,error:'books_app_bridge_disabled',contract:BOOKS_APP_CONTRACT},503);
+    const auth=await requireIdentity(request,env); if(auth.response) return auth.response; const customer=await ensureCustomer(env,auth.identity);
+    const caps=booksAppCapabilities(env);
+    if(path==='/api/books-app/v1/bootstrap'&&request.method==='GET'){
+      const [library,saved,recent]=await Promise.all([readerLibrary(env,customer.id),readerSaved(env,customer.id),readerRecent(env,customer.id)]);
+      return json({ok:true,contract:BOOKS_APP_CONTRACT,identity:publicIdentity(auth.identity),customer:{id:customer.id,userId:customer.user_id,displayName:customer.display_name,email:customer.email},capabilities:caps,library,saved,recent,sync:{endpoint:'/api/books-app/v1/sync',cursor:0}});
+    }
+    if(path==='/api/books-app/v1/library'&&request.method==='GET') return json({ok:true,contract:BOOKS_APP_CONTRACT,items:await readerLibrary(env,customer.id)});
+    if(path==='/api/books-app/v1/devices'&&request.method==='POST'){
+      let device;try{device=normalizeBooksDevice(await safeJson(request)||{})}catch(err){return json({ok:false,error:String(err.message||err)},400)}
+      const id=`device:${customer.id}:${device.installationId}`.slice(0,240),stamp=now();
+      await env.DB.prepare(`INSERT INTO books_app_devices (id,customer_id,installation_id,platform,app_version,os_version,device_model,locale,push_capable,last_seen_at,created_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(customer_id,installation_id) DO UPDATE SET platform=excluded.platform,app_version=excluded.app_version,os_version=excluded.os_version,device_model=excluded.device_model,locale=excluded.locale,push_capable=excluded.push_capable,last_seen_at=excluded.last_seen_at`).bind(id,customer.id,device.installationId,device.platform,device.appVersion,device.osVersion,device.deviceModel,device.locale,device.pushCapable?1:0,stamp,stamp,JSON.stringify({contract:BOOKS_APP_CONTRACT})).run();
+      return json({ok:true,deviceId:id,customerId:customer.id,pushEnabled:caps.pushEnabled});
+    }
+    if(path==='/api/books-app/v1/sync'&&request.method==='GET'){
+      const since=Math.max(0,Number.parseInt(url.searchParams.get('since')||'0',10)||0),limit=Math.max(1,Math.min(250,Number.parseInt(url.searchParams.get('limit')||'100',10)||100));
+      const changes=await all(env.DB.prepare(`SELECT seq,change_id,change_kind,object_type,object_id,occurred_at,payload_json FROM books_app_changes WHERE customer_id=? AND seq>? ORDER BY seq LIMIT ?`).bind(customer.id,since,limit));
+      const items=changes.map(x=>({...x,payload:safeAddress(x.payload_json)})),nextCursor=items.length?Number(items[items.length-1].seq):since;
+      return json({ok:true,contract:BOOKS_APP_CONTRACT,since,nextCursor,hasMore:items.length===limit,changes:items});
+    }
+    if(path.match(/^\/api\/books-app\/v1\/progress\/[^/]+$/)&&request.method==='PATCH'){
+      const editionId=decodeURIComponent(path.split('/')[5]); const entitlement=await env.DB.prepare(`SELECT ce.id,e.format,b.slug FROM customer_entitlements ce JOIN editions e ON e.id=ce.edition_id JOIN books b ON b.id=e.book_id WHERE ce.customer_id=? AND ce.edition_id=? AND ce.status='active'`).bind(customer.id,editionId).first(); if(!entitlement)return json({ok:false,error:'entitlement_required'},403);
+      let patch;try{patch=normalizeBooksProgressPatch(await safeJson(request)||{})}catch(err){return json({ok:false,error:String(err.message||err)},400)} if(patch.progressKind!==String(entitlement.format).toLowerCase())return json({ok:false,error:'progress_kind_mismatch'},400);
+      const current=await env.DB.prepare(`SELECT revision,percent,updated_at FROM reader_progress WHERE customer_id=? AND edition_id=?`).bind(customer.id,editionId).first(),currentRevision=Number(current?.revision||0);
+      if(patch.expectedRevision!=null&&patch.expectedRevision!==currentRevision)return json({ok:false,error:'progress_revision_conflict',current:{revision:currentRevision,percent:Number(current?.percent||0),updatedAt:current?.updated_at||null}},409);
+      const revision=currentRevision+1,stamp=now();
+      await env.DB.prepare(`INSERT INTO reader_progress (customer_id,edition_id,progress_kind,percent,locator_json,seconds_position,completed_at,updated_at,revision,source_device_id,client_updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(customer_id,edition_id) DO UPDATE SET progress_kind=excluded.progress_kind,percent=excluded.percent,locator_json=excluded.locator_json,seconds_position=excluded.seconds_position,completed_at=excluded.completed_at,updated_at=excluded.updated_at,revision=excluded.revision,source_device_id=excluded.source_device_id,client_updated_at=excluded.client_updated_at`).bind(customer.id,editionId,patch.progressKind,patch.percent,patch.locator?JSON.stringify(patch.locator):null,patch.secondsPosition,patch.completed?stamp:null,stamp,revision,patch.deviceId,patch.clientUpdatedAt).run();
+      await recordBooksAppChange(env,{customerId:customer.id,kind:'progress.changed',objectType:'edition',objectId:editionId,payload:{revision,percent:patch.percent,completed:patch.completed,deviceId:patch.deviceId}});
+      return json({ok:true,contract:BOOKS_APP_CONTRACT,editionId,revision,...patch,deepLinks:booksDeepLinks({baseUrl:env.PUBLIC_APP_URL||url.origin,scheme:env.BOOKS_APP_SCHEME||'yasreadybooks',bookSlug:entitlement.slug,editionId,action:patch.progressKind==='audiobook'?'listen':'read'})});
+    }
+    if(path.match(/^\/api\/books-app\/v1\/content\/[^/]+\/manifest$/)&&request.method==='GET'){
+      const editionId=decodeURIComponent(path.split('/')[5]),manifest=await booksAppContentManifest(env,{customerId:customer.id,editionId}); if(!manifest)return json({ok:false,error:'entitlement_required'},403); return json({ok:true,...manifest});
+    }
+    return json({ok:false,error:'books_app_route_not_found',contract:BOOKS_APP_CONTRACT},404);
+  }
+
   if(path.startsWith('/api/reader/')){
     const auth=await requireIdentity(request,env); if(auth.response) return auth.response; const customer=await ensureCustomer(env,auth.identity);
     if(path==='/api/reader/session'&&request.method==='GET') return json({ok:true,identity:publicIdentity(auth.identity),customer:{id:customer.id,userId:customer.user_id,displayName:customer.display_name,email:customer.email}});
     if(path==='/api/reader/library'&&request.method==='GET') return json({ok:true,items:await readerLibrary(env,customer.id)});
+    if(path==='/api/reader/orders'&&request.method==='GET'){
+      const orders=await all(env.DB.prepare(`SELECT o.id,o.currency,o.total_minor,o.payment_status,o.fulfillment_status,o.created_at,o.paid_at,o.refunded_at,COUNT(oi.id) item_count FROM orders o LEFT JOIN order_items oi ON oi.order_id=o.id WHERE o.customer_id=? GROUP BY o.id ORDER BY o.created_at DESC LIMIT 100`).bind(customer.id));return json({ok:true,orders});
+    }
+    if(path.match(/^\/api\/reader\/orders\/[^/]+$/)&&request.method==='GET'){
+      const orderId=decodeURIComponent(path.split('/')[4]),order=await env.DB.prepare(`SELECT id,currency,subtotal_minor,tax_minor,shipping_minor,discount_minor,total_minor,payment_status,fulfillment_status,created_at,paid_at,refunded_at FROM orders WHERE id=? AND customer_id=?`).bind(orderId,customer.id).first();if(!order)return json({ok:false,error:'order_not_found'},404);const items=await all(env.DB.prepare(`SELECT oi.id,b.id book_id,b.slug,b.title,e.id edition_id,e.format,oi.quantity,oi.unit_price_minor,oi.gross_minor,oi.refunded_minor FROM order_items oi JOIN editions e ON e.id=oi.edition_id JOIN books b ON b.id=e.book_id WHERE oi.order_id=? ORDER BY oi.created_at`).bind(orderId));return json({ok:true,order:{...order,items}});
+    }
     if(path==='/api/reader/saved'&&request.method==='GET') return json({ok:true,books:await readerSaved(env,customer.id)});
     if(path.match(/^\/api\/reader\/saved\/[^/]+$/)&&request.method==='POST'){
       const bookId=decodeURIComponent(path.split('/')[4]); const book=(await getCatalog(env)).find(b=>b.id===bookId); if(!book) return json({ok:false,error:'book_not_found'},404);
-      await env.DB.prepare(`INSERT OR IGNORE INTO customer_saved_books (customer_id,book_id,created_at) VALUES (?,?,?)`).bind(customer.id,bookId,now()).run(); return json({ok:true,saved:true,bookId});
+      await env.DB.prepare(`INSERT OR IGNORE INTO customer_saved_books (customer_id,book_id,created_at) VALUES (?,?,?)`).bind(customer.id,bookId,now()).run(); await recordBooksAppChange(env,{customerId:customer.id,kind:'saved.changed',objectType:'book',objectId:bookId,payload:{saved:true}}); return json({ok:true,saved:true,bookId});
     }
     if(path.match(/^\/api\/reader\/saved\/[^/]+$/)&&request.method==='DELETE'){
-      const bookId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM customer_saved_books WHERE customer_id=? AND book_id=?`).bind(customer.id,bookId).run(); return json({ok:true,saved:false,bookId});
+      const bookId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM customer_saved_books WHERE customer_id=? AND book_id=?`).bind(customer.id,bookId).run(); await recordBooksAppChange(env,{customerId:customer.id,kind:'saved.changed',objectType:'book',objectId:bookId,payload:{saved:false,tombstone:true}}); return json({ok:true,saved:false,bookId});
     }
     if(path==='/api/reader/recent'&&request.method==='GET') return json({ok:true,books:await readerRecent(env,customer.id)});
     if(path.match(/^\/api\/reader\/recent\/[^/]+$/)&&request.method==='POST'){
       const bookId=decodeURIComponent(path.split('/')[4]); const book=(await getCatalog(env)).find(b=>b.id===bookId); if(!book) return json({ok:false,error:'book_not_found'},404);
-      await env.DB.prepare(`INSERT INTO customer_recent_books (customer_id,book_id,last_viewed_at,view_count) VALUES (?,?,?,1) ON CONFLICT(customer_id,book_id) DO UPDATE SET last_viewed_at=excluded.last_viewed_at,view_count=customer_recent_books.view_count+1`).bind(customer.id,bookId,now()).run(); return json({ok:true,bookId});
+      await env.DB.prepare(`INSERT INTO customer_recent_books (customer_id,book_id,last_viewed_at,view_count) VALUES (?,?,?,1) ON CONFLICT(customer_id,book_id) DO UPDATE SET last_viewed_at=excluded.last_viewed_at,view_count=customer_recent_books.view_count+1`).bind(customer.id,bookId,now()).run(); await recordBooksAppChange(env,{customerId:customer.id,kind:'recent.changed',objectType:'book',objectId:bookId,payload:{viewed:true}}); return json({ok:true,bookId});
     }
     if(path.match(/^\/api\/reader\/progress\/[^/]+$/)&&request.method==='PATCH'){
       const editionId=decodeURIComponent(path.split('/')[4]); const entitlement=await env.DB.prepare(`SELECT ce.id,e.format FROM customer_entitlements ce JOIN editions e ON e.id=ce.edition_id WHERE ce.customer_id=? AND ce.edition_id=? AND ce.status='active'`).bind(customer.id,editionId).first(); if(!entitlement) return json({ok:false,error:'entitlement_required'},403);
-      const progress=normalizeReaderProgress(await safeJson(request)||{}); if(progress.progressKind!==String(entitlement.format).toLowerCase()) return json({ok:false,error:'progress_kind_mismatch'},400);
-      await env.DB.prepare(`INSERT INTO reader_progress (customer_id,edition_id,progress_kind,percent,locator_json,seconds_position,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(customer_id,edition_id) DO UPDATE SET progress_kind=excluded.progress_kind,percent=excluded.percent,locator_json=excluded.locator_json,seconds_position=excluded.seconds_position,completed_at=excluded.completed_at,updated_at=excluded.updated_at`).bind(customer.id,editionId,progress.progressKind,progress.percent,progress.locator?JSON.stringify(progress.locator):null,progress.secondsPosition,progress.completed?now():null,now()).run();
-      return json({ok:true,editionId,...progress});
+      const body=await safeJson(request)||{},progress=normalizeReaderProgress(body); if(progress.progressKind!==String(entitlement.format).toLowerCase()) return json({ok:false,error:'progress_kind_mismatch'},400);
+      const current=await env.DB.prepare(`SELECT revision,percent,updated_at FROM reader_progress WHERE customer_id=? AND edition_id=?`).bind(customer.id,editionId).first(),currentRevision=Number(current?.revision||0),expected=body.expectedRevision==null?null:Number(body.expectedRevision);
+      if(expected!=null&&expected!==currentRevision)return json({ok:false,error:'progress_revision_conflict',current:{revision:currentRevision,percent:Number(current?.percent||0),updatedAt:current?.updated_at||null}},409);
+      const revision=currentRevision+1,stamp=now();
+      await env.DB.prepare(`INSERT INTO reader_progress (customer_id,edition_id,progress_kind,percent,locator_json,seconds_position,completed_at,updated_at,revision,source_device_id,client_updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(customer_id,edition_id) DO UPDATE SET progress_kind=excluded.progress_kind,percent=excluded.percent,locator_json=excluded.locator_json,seconds_position=excluded.seconds_position,completed_at=excluded.completed_at,updated_at=excluded.updated_at,revision=excluded.revision,source_device_id=excluded.source_device_id,client_updated_at=excluded.client_updated_at`).bind(customer.id,editionId,progress.progressKind,progress.percent,progress.locator?JSON.stringify(progress.locator):null,progress.secondsPosition,progress.completed?stamp:null,stamp,revision,body.deviceId||'web',body.clientUpdatedAt||null).run();
+      await recordBooksAppChange(env,{customerId:customer.id,kind:'progress.changed',objectType:'edition',objectId:editionId,payload:{revision,percent:progress.percent,completed:progress.completed,deviceId:body.deviceId||'web'}});
+      return json({ok:true,editionId,revision,...progress});
     }
     if(path.match(/^\/api\/reader\/follow\/[^/]+$/)&&request.method==='POST'){
-      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`INSERT OR IGNORE INTO author_follows (customer_id,author_id,created_at) VALUES (?,?,?)`).bind(customer.id,authorId,now()).run(); return json({ok:true,following:true,authorId});
+      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`INSERT OR IGNORE INTO author_follows (customer_id,author_id,created_at) VALUES (?,?,?)`).bind(customer.id,authorId,now()).run(); await recordBooksAppChange(env,{customerId:customer.id,kind:'follow.changed',objectType:'author',objectId:authorId,payload:{following:true}}); return json({ok:true,following:true,authorId});
     }
     if(path.match(/^\/api\/reader\/follow\/[^/]+$/)&&request.method==='DELETE'){
-      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM author_follows WHERE customer_id=? AND author_id=?`).bind(customer.id,authorId).run(); return json({ok:true,following:false,authorId});
+      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM author_follows WHERE customer_id=? AND author_id=?`).bind(customer.id,authorId).run(); await recordBooksAppChange(env,{customerId:customer.id,kind:'follow.changed',objectType:'author',objectId:authorId,payload:{following:false,tombstone:true}}); return json({ok:true,following:false,authorId});
     }
     return json({ok:false,error:'reader_route_not_found'},404);
   }
@@ -684,6 +736,18 @@ async function api(request,env){
     catch(err){await env.DB.prepare(`UPDATE provider_webhook_events SET processing_status='failed',processed_at=?,error_summary=? WHERE provider='stripe' AND external_event_id=?`).bind(now(),String(err.message||err).slice(0,500),event.id).run();return json({ok:false,error:'webhook_processing_failed'},500)}
   }
 
+  if(path==='/api/admin/commerce/readiness'&&request.method==='GET'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    const latest=await env.DB.prepare(`SELECT id,status,started_at,completed_at,results_json FROM commerce_test_runs WHERE provider='stripe' AND mode='test' ORDER BY started_at DESC LIMIT 1`).first();
+    return json({ok:true,stripe:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),latestTestRun:latest?{...latest,results:safeAddress(latest.results_json)}:null});
+  }
+  if(path==='/api/admin/commerce/test-runs'&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const id=uuid(),stamp=now();await env.DB.prepare(`INSERT INTO commerce_test_runs (id,provider,mode,status,scenarios_json,started_at,created_by) VALUES (?,'stripe','test','running',?,?,?)`).bind(id,JSON.stringify(STRIPE_TEST_SCENARIOS),stamp,'commerce-admin').run();return json({ok:true,id,status:'running',scenarios:STRIPE_TEST_SCENARIOS,readiness:stripeTestReadiness(env)},201);
+  }
+  if(path.match(/^\/api\/admin\/commerce\/test-runs\/[^/]+\/complete$/)&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const id=decodeURIComponent(path.split('/')[5]),body=await safeJson(request)||{},evaluation=evaluateStripeTestRun(body.results||{}),stamp=now();const out=await env.DB.prepare(`UPDATE commerce_test_runs SET status=?,results_json=?,completed_at=? WHERE id=? AND status='running'`).bind(evaluation.status,JSON.stringify(evaluation.results),stamp,id).run();if(!out.meta?.changes)return json({ok:false,error:'test_run_not_found_or_closed'},404);return json({ok:true,id,...evaluation,completedAt:stamp});
+  }
+
   if(path==='/api/admin/commerce/summary'&&request.method==='GET'){
     if(!requireAdmin(request,env)) return json({ok:false,error:'unauthorized'},401); return json({ok:true,...await stripeCommerceSummary(env)});
   }
@@ -801,7 +865,7 @@ async function api(request,env){
   }
 
   if(path==='/api/providers/ingram/status') return json({ok:true,...ingramReadiness(env),capabilities:ingramCapabilities,note:'CDF/EDI, data feeds and other Ingram transports remain eligibility/contract-gated. Marketplace prepares and consumes normalized documents without assuming private Ingram endpoints.'});
-  if(path==='/api/providers/stripe/status') return json({ok:true,mode:env.STRIPE_MODE||'off',checkoutEnabled:env.CHECKOUT_ENABLED==='true',capabilities:['checkout','connect_onboarding','signed_webhooks','separate_charges_transfers','refunds','disputes','payout_gates','reconciliation']});
+  if(path==='/api/providers/stripe/status') return json({ok:true,...stripeTestReadiness(env),capabilities:['checkout','connect_onboarding','signed_webhooks','separate_charges_transfers','refunds','disputes','payout_gates','reconciliation','digital_entitlements']});
   if(path==='/api/economics/calculate'&&request.method==='POST'){const b=await safeJson(request);return json({ok:true,...sellerPayable(b||{})});}
   return json({ok:false,error:'not_found'},404);
 }
@@ -812,6 +876,6 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(url.pathname.startsWith('/r/')) return marketingShortRedirect(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.10.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.11.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

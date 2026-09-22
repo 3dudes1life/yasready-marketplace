@@ -1,34 +1,14 @@
-# Marketplace | YasReady v0.10.0 — Build Report
+# Marketplace | YasReady v0.11.0 — Build Report
 
-**Release:** Analytics Brain  
-**Baseline:** v0.9.0 Marketing Studio  
-**Primary goal:** turn Marketplace commercial data into comparable, explainable author intelligence without pretending Marketplace knows full-company profit.
+## Release
+**v0.11.0 — Stripe Test Commerce Closure + YasReady. Books App Bridge**
 
-## Added in v0.10
+This release closes the test-commerce architecture while deliberately building the hidden contracts the future YasReady. Books app will consume. Live money, Books content delivery, push, and provider submission remain fail-closed by default.
 
-- New **Insights** workspace inside the YasReady author shell.
-- Comparable current-period vs previous-period analysis.
-- Tracked direct-sale contribution economics.
-- Format concentration and book-level economics.
-- Daily trend direction and unusual spike/drop detection.
-- Evidence-based YasReady Signals with dismiss state.
-- Analytics Brain persistence/history boundary.
-- Business export now includes compact analytics intelligence.
-- Dedicated Analytics Brain migration, engine library, tests and verification command.
-- Updated no-install showcase focused on Analytics Brain.
-
-## Important accounting boundary
-
-The Analytics Brain calculates **Tracked contribution**, not net profit:
-
-`gross - refunds - Marketplace fee - processor fees - fulfillment - tracked marketing spend`
-
-Marketplace does not claim to know editing, design, payroll, subscriptions, tax, overhead or other company expenses. Those belong in Business | YasReady.
-
-## Verification actually run
-
-- JavaScript syntax: **PASS** (`src/main.js`, `src/worker.mjs`, `src/lib/analytics-brain.mjs`)
-- Engine/unit tests: **83/83 PASS**
+## Verified
+- Core engine tests: **106/106 PASS** (`npm test`)
+- Books app bridge checks: **12/12 PASS**
+- Stripe test closure checks: **10/10 PASS**
 - Analytics Brain checks: **20/20 PASS**
 - UI Closure regression checks: **20/20 PASS**
 - Catalog Management checks: **16/16 PASS**
@@ -37,18 +17,42 @@ Marketplace does not claim to know editing, design, payroll, subscriptions, tax,
 - YasReady visual parity checks: **16/16 PASS**
 - GitHub Pages checks: **7/7 PASS**
 - Publishing Handshake checks: **8/8 PASS**
-- Fresh SQLite migration replay: **12/12 PASS**
-- Fresh schema size: **67 application tables**
-- Analytics SQL smoke checks: **2/2 PASS** (daily sales + book economics queries)
+- JavaScript syntax checks: **PASS** for `src/main.js`, `src/worker.mjs`, `src/lib/books-app.mjs`, `src/lib/stripe-test-cert.mjs`, and `src/lib/stripe-commerce.mjs`
+- Fresh SQLite migration replay: **13/13 PASS**
+- Fresh schema: **72 application tables**
+- New Books/commerce columns and tables verified after fresh replay.
 
-## Production bundle status
+## Books app bridge included now
+- Versioned contract: `yasready.books.marketplace.v1`
+- Same YasReady identity; no second reader account system
+- Paid ebook/audiobook order → active library entitlement
+- Fully refunded digital order item → entitlement revocation
+- Guest purchase can be claimed by a later YasReady login using the same email
+- Library, Saved, Recent, author follows, and progress remain Marketplace-owned source of truth
+- Cross-device progress revisions with optimistic concurrency
+- Device registration model without storing raw push tokens yet
+- Incremental change feed with sync cursor
+- Future app deep links (`yasreadybooks://...`) plus web fallback
+- Digital content manifests with entitlement checks
+- Actual content delivery and push notifications remain disabled
 
-`npm run build` was attempted, but this execution environment does not have the package dependencies installed, so the command stops at:
+## Stripe test-commerce closure included now
+- Explicit test-mode readiness report
+- Persisted certification runs
+- Eight required scenarios: single-author checkout, multi-author checkout, signed-webhook replay, digital entitlement grant, Connect onboarding, refund reconciliation, transfer ceiling, dispute hold
+- Existing checkout validation, webhook idempotency, refunds, Connect, seller allocations, transfers, and reconciliation retained
+- Reader order-history endpoints reserved for Marketplace / Books app continuity
 
-`vite: not found`
+## Safety defaults
+The tracked deployment defaults remain fail closed, including:
+- `CHECKOUT_ENABLED=false`
+- `STRIPE_MODE=off`
+- `REFUNDS_ENABLED=false`
+- `TRANSFERS_ENABLED=false`
+- `INGRAM_MODE=off`
+- `BOOKS_APP_BRIDGE_ENABLED=false`
+- `BOOKS_APP_DELIVERY_ENABLED=false`
+- `BOOKS_APP_PUSH_ENABLED=false`
 
-This is an environment/dependency limitation, not reported as a passing bundle. Run `npm install && npm run verify` locally before production deployment.
-
-## Safety
-
-Existing fail-closed production defaults remain intact. v0.10 does not enable live checkout, payouts, refunds, Ingram submission or Publishing import.
+## Production bundle note
+`npm run build` was attempted in this execution environment and stopped with `vite: not found` because `node_modules` / Vite are not installed here. Therefore the Vite production bundle is **not marked verified**. The source, schema, engine, feature, Pages, and syntax checks listed above were actually executed and passed.

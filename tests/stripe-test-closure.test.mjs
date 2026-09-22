@@ -1,0 +1,12 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';import {STRIPE_TEST_SCENARIOS,stripeTestReadiness,evaluateStripeTestRun} from '../src/lib/stripe-test-cert.mjs';
+const read=p=>fs.readFileSync(new URL(p,import.meta.url),'utf8');
+test('v0.11 Stripe closure defines eight certification scenarios',()=>assert.equal(STRIPE_TEST_SCENARIOS.length,8));
+test('v0.11 Stripe test readiness is fail closed without secrets',()=>assert.equal(stripeTestReadiness({STRIPE_MODE:'test',CHECKOUT_ENABLED:'true'}).checkoutTestReady,false));
+test('v0.11 Stripe test readiness becomes true with explicit test config',()=>assert.equal(stripeTestReadiness({STRIPE_MODE:'test',CHECKOUT_ENABLED:'true',STRIPE_SECRET_KEY:'sk_test_x',STRIPE_WEBHOOK_SECRET:'whsec_x',PUBLIC_APP_URL:'https://example.test'}).checkoutTestReady,true));
+test('v0.11 live mode is explicitly observable',()=>assert.equal(stripeTestReadiness({STRIPE_MODE:'live',CHECKOUT_ENABLED:'true'}).liveMoneyEnabled,true));
+test('v0.11 test run fails unless every scenario passes',()=>{const r=evaluateStripeTestRun({single_author_checkout:true});assert.equal(r.passed,false);assert.equal(r.passedCount,1)});
+test('v0.11 test run passes when all scenarios pass',()=>{const r=evaluateStripeTestRun(Object.fromEntries(STRIPE_TEST_SCENARIOS.map(x=>[x,true])));assert.equal(r.passed,true);assert.equal(r.status,'passed')});
+test('v0.11 worker exposes commerce readiness and test-run APIs',()=>{const w=read('../src/worker.mjs');for(const x of ['/api/admin/commerce/readiness','/api/admin/commerce/test-runs','evaluateStripeTestRun'])assert.match(w,new RegExp(x.replaceAll('/','\\/'))) });
+test('v0.11 customer order history exists for reader/app handoff',()=>{const w=read('../src/worker.mjs');assert.match(w,/\/api\/reader\/orders/);assert.match(w,/customer_id=\?/)});
+test('v0.11 provider status includes digital entitlement capability',()=>assert.match(read('../src/worker.mjs'),/digital_entitlements/));
+test('v0.11 production switches remain off in wrangler',()=>{const w=read('../wrangler.jsonc');for(const x of ['"CHECKOUT_ENABLED": "false"','"REFUNDS_ENABLED": "false"','"TRANSFERS_ENABLED": "false"','"BOOKS_APP_DELIVERY_ENABLED": "false"'])assert.match(w,new RegExp(x))});
