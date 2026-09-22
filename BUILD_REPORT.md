@@ -1,63 +1,54 @@
-# Marketplace | YasReady v0.9.0 — Build Report
+# Marketplace | YasReady v0.10.0 — Build Report
 
-**Release:** Marketing Studio  
-**Target:** `marketplace.yasready.com`  
-**Repository:** `3dudes1life/yasready-marketplace`
+**Release:** Analytics Brain  
+**Baseline:** v0.9.0 Marketing Studio  
+**Primary goal:** turn Marketplace commercial data into comparable, explainable author intelligence without pretending Marketplace knows full-company profit.
 
-## Release objective
+## Added in v0.10
 
-v0.9 turns the attribution plumbing already inside Marketplace into a usable author growth system. Promotion stays attached to the canonical Marketplace book, so campaign links, QRs, website assets, traffic and eventual orders share the same campaign identity.
+- New **Insights** workspace inside the YasReady author shell.
+- Comparable current-period vs previous-period analysis.
+- Tracked direct-sale contribution economics.
+- Format concentration and book-level economics.
+- Daily trend direction and unusual spike/drop detection.
+- Evidence-based YasReady Signals with dismiss state.
+- Analytics Brain persistence/history boundary.
+- Business export now includes compact analytics intelligence.
+- Dedicated Analytics Brain migration, engine library, tests and verification command.
+- Updated no-install showcase focused on Analytics Brain.
 
-The design rule remains: **more capability should not create more work for the author.** A campaign produces a reusable bundle instead of making the author configure each asset separately.
+## Important accounting boundary
 
-## Marketing Studio added
+The Analytics Brain calculates **Tracked contribution**, not net profit:
 
-- Campaign goals: launch, sales, awareness, reviews, events and evergreen.
-- Optional planned/actual marketing cost records.
-- Trackable Marketplace campaign URLs.
-- Marketplace-owned short-link records and tracked redirects.
-- QR campaign assets.
-- Website button/embed assets.
-- Social, email and event copy.
-- Reusable launch/checklist kits.
-- Conversion, net attributed revenue, revenue per visit and ROAS calculations.
-- Channel ranking and evidence-based YasReady Signal recommendations.
-- Marketing metrics exported through the existing Business handoff seam.
+`gross - refunds - Marketplace fee - processor fees - fulfillment - tracked marketing spend`
 
-## Data foundation
-
-Migration `0011_marketing_studio.sql` adds campaign objective/budget/status fields plus:
-
-- `marketing_short_links`
-- `marketing_campaign_costs`
-- `marketing_launch_kits`
-- `marketing_recommendations`
-
-Existing `campaigns`, `marketing_assets`, `marketplace_events`, `orders` and `order_items` remain the canonical attribution/commerce records.
-
-## Safety
-
-v0.9 does not post to social networks, purchase ads or spend funds. Cost records are author-entered planning/accounting data. Existing checkout, Stripe live mode, automatic refund/payout/transfer, Ingram submission/import and Publishing transport switches remain fail-closed.
+Marketplace does not claim to know editing, design, payroll, subscriptions, tax, overhead or other company expenses. Those belong in Business | YasReady.
 
 ## Verification actually run
 
-- **73/73** Node engine/regression tests passed.
-- **16/16** Marketing Studio checks passed.
-- **20/20** UI Closure regression checks passed.
-- **16/16** Catalog Management checks passed.
-- **12/12** Consumer Marketplace checks passed.
-- **16/16** YasReady visual parity checks passed.
-- **7/7** GitHub Pages checks passed.
-- **8/8** Publishing Handshake checks passed.
-- JavaScript syntax checks passed for `src/main.js`, `src/worker.mjs`, `src/lib/marketing-studio.mjs`, and `src/lib/business.mjs`.
-- All **11/11** SQL migrations replayed successfully from an empty SQLite database.
-- Fresh database produced **64 application tables**.
+- JavaScript syntax: **PASS** (`src/main.js`, `src/worker.mjs`, `src/lib/analytics-brain.mjs`)
+- Engine/unit tests: **83/83 PASS**
+- Analytics Brain checks: **20/20 PASS**
+- UI Closure regression checks: **20/20 PASS**
+- Catalog Management checks: **16/16 PASS**
+- Consumer Marketplace checks: **12/12 PASS**
+- Marketing Studio checks: **16/16 PASS**
+- YasReady visual parity checks: **16/16 PASS**
+- GitHub Pages checks: **7/7 PASS**
+- Publishing Handshake checks: **8/8 PASS**
+- Fresh SQLite migration replay: **12/12 PASS**
+- Fresh schema size: **67 application tables**
+- Analytics SQL smoke checks: **2/2 PASS** (daily sales + book economics queries)
 
 ## Production bundle status
 
-The Vite production bundle is not marked verified in this runtime because `node_modules` is not installed. Run locally:
+`npm run build` was attempted, but this execution environment does not have the package dependencies installed, so the command stops at:
 
-```bash
-npm install
-npm run verify
-```
+`vite: not found`
+
+This is an environment/dependency limitation, not reported as a passing bundle. Run `npm install && npm run verify` locally before production deployment.
+
+## Safety
+
+Existing fail-closed production defaults remain intact. v0.10 does not enable live checkout, payouts, refunds, Ingram submission or Publishing import.

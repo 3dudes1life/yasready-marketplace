@@ -1,27 +1,37 @@
 # Changelog
 
+## 0.10.0 — Analytics Brain
+
+- Added a first-class **Insights** workspace inside the YasReady author shell.
+- Added comparable-period analysis for sales, orders, units, views, conversion, refunds and seller payable.
+- Added tracked direct-sale contribution economics using only Marketplace-known costs.
+- Explicitly avoids labeling Marketplace contribution as company net profit.
+- Added format concentration analysis and book-level contribution economics.
+- Added daily trend direction plus deterministic spike/drop detection.
+- Added evidence-based YasReady Signals for revenue movement, conversion pressure, refunds, fulfillment cost, format concentration and campaign efficiency.
+- Added dismissible signal state so authors can hide irrelevant guidance without deleting underlying data.
+- Added `GET /api/me/analytics-brain`, `POST /api/me/analytics-brain/refresh`, and signal-dismiss API.
+- Added `0012_analytics_brain.sql` with brain runs, signal state and daily rollup cache tables.
+- Added Analytics Brain summaries to the existing Business export contract.
+- Added `ANALYTICS_VERIFY.command`, dedicated verifier and pure Analytics Brain engine tests.
+- Preserved the v0.9 Marketing Studio, v0.8 reader layer, v0.7 catalog workflow and v0.6 YasReady UI shell.
+
 ## 0.9.0 — Marketing Studio
 
-- Rebuilt Promote into a real Marketing Studio while preserving the v0.8 reader layer and v0.6 YasReady shell.
-- Added campaign goals, optional budgets and persistent campaign-cost records.
-- Added launch-kit generation with social, email, event copy and launch checklists.
-- Added Marketplace-owned short-link records and tracked `/r/:slug` redirects.
-- Added conversion, net attributed revenue, revenue-per-visit and ROAS calculations.
-- Added channel ranking and evidence-based YasReady Signal recommendations.
-- Added campaign asset plans that adapt to social, email, website and offline/event channels.
-- Added Marketing Studio API returning campaign performance + recommendation state per book.
-- Added marketing metrics to the Business export seam so Business does not need to reverse-engineer Marketplace later.
-- Added `0011_marketing_studio.sql`, `src/lib/marketing-studio.mjs`, `MARKETING_VERIFY.command`, and Marketing Studio regression checks.
-- Preserved all live-money, Ingram and Publishing safety gates.
+- Rebuilt Promote into a real Marketing Studio.
+- Added campaign goals, optional spend, trackable short links, QR assets, launch kits and attribution intelligence.
+- Added campaign conversion, revenue-per-visit and ROAS calculations.
+- Added evidence-based Marketing Studio recommendations.
+- Added marketing intelligence to the Business export seam.
 
 ## 0.8.0 — Consumer Marketplace Closure
 
-- Added consumer discovery, Saved, Recently Viewed, author/series pages and a canonical reader library/progress foundation for YasReady. Books.
-- Added the shared YasReady customer identity and digital entitlement/progress APIs.
-- Preserved v0.7 catalog management and prior commerce/provider safety gates.
+- Added discovery, saved titles, recently viewed, author/series pages and canonical reader library/progress concepts for future YasReady. Books.
 
 ## 0.7.0 — Real Catalog & Book Management
 
-- Added Marketplace-owned presentation overrides without replacing Publishing production truth.
-- Added autosaved working drafts, validation, live preview, apply revision and catalog history.
-- Added author-profile concurrency protection and listing revision locks.
+- Added draft/autosave catalog editing, validation, reader preview, optimistic concurrency and audited listing revisions.
+
+## 0.6.0 — YasReady UI Closure
+
+- Separated the public storefront from the logged-in YasReady author operating shell and locked visual parity.

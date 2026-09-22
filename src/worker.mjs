@@ -13,6 +13,7 @@ import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePu
 import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from './lib/catalog-management.mjs';
 import {normalizeReaderProgress} from './lib/consumer.mjs';
 import {normalizeCampaignDraft,campaignMetrics,marketingRecommendation,launchKit,shortLinkSlug,channelConfig} from './lib/marketing-studio.mjs';
+import {buildAnalyticsBrain,subtractStats,subtractFormats} from './lib/analytics-brain.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -206,6 +207,37 @@ async function authorStats(env,authorId,days=30){
   return {period:{days:Number(days)||30,start,end:now()},totals:{orders,units:Number(totals?.units||0),grossSalesMinor:Number(totals?.gross_sales_minor||0),marketplaceFeesMinor:Number(totals?.marketplace_fees_minor||0),processorFeesMinor:Number(totals?.processor_fees_minor||0),fulfillmentCostMinor:Number(totals?.fulfillment_cost_minor||0),refundsMinor:Number(totals?.refunds_minor||0),disputedMinor:Number(totals?.disputed_minor||0),transferredMinor:Number(totals?.transferred_minor||0),sellerPayableMinor:Number(totals?.seller_payable_minor||0),views,conversionRate:views?Number(((orders/views)*100).toFixed(2)):0,currency:'usd'},formats:formats.map(x=>({format:x.format,units:Number(x.units),grossMinor:Number(x.gross_minor)})),campaigns:campaigns.map(x=>({campaign:x.campaign,source:x.source,orders:Number(x.orders),grossMinor:Number(x.gross_minor)})),externalChannels:externalChannels.map(x=>({provider:x.provider,channel:x.channel,units:Number(x.units),grossMinor:Number(x.gross_minor),netMinor:Number(x.net_minor),returnsMinor:Number(x.returns_minor)})),marketing,recentOrders};
 }
 
+
+async function analyticsDailyRows(env,authorId,start){
+  const sales=await all(env.DB.prepare(`SELECT substr(o.created_at,1,10) metric_date,COUNT(DISTINCT o.id) orders,COALESCE(SUM(oi.quantity),0) units,COALESCE(SUM(oi.gross_minor),0) gross_minor,COALESCE(SUM(oi.refunded_minor),0) refunds_minor FROM order_items oi JOIN orders o ON o.id=oi.order_id WHERE oi.author_id=? AND o.created_at>=? AND o.payment_status IN ('paid','succeeded','partially_refunded') GROUP BY substr(o.created_at,1,10) ORDER BY metric_date`).bind(authorId,start));
+  const views=await all(env.DB.prepare(`SELECT substr(me.occurred_at,1,10) metric_date,COUNT(*) views FROM marketplace_events me JOIN books b ON b.id=me.book_id WHERE b.author_id=? AND me.occurred_at>=? AND me.event_type IN ('book_viewed','campaign_landing') GROUP BY substr(me.occurred_at,1,10) ORDER BY metric_date`).bind(authorId,start));
+  const by=new Map();for(const r of sales)by.set(r.metric_date,{date:r.metric_date,orders:Number(r.orders||0),units:Number(r.units||0),grossMinor:Number(r.gross_minor||0),refundsMinor:Number(r.refunds_minor||0),views:0});for(const r of views){const x=by.get(r.metric_date)||{date:r.metric_date,orders:0,units:0,grossMinor:0,refundsMinor:0,views:0};x.views=Number(r.views||0);by.set(r.metric_date,x)}return [...by.values()].sort((a,b)=>a.date.localeCompare(b.date));
+}
+
+async function analyticsBookRows(env,authorId,start){
+  const rows=await all(env.DB.prepare(`SELECT b.id book_id,COALESCE(l.display_title,b.title) title,COUNT(DISTINCT o.id) orders,COALESCE(SUM(oi.quantity),0) units,COALESCE(SUM(oi.gross_minor),0) gross_minor,COALESCE(SUM(oi.refunded_minor),0) refunds_minor,COALESCE(SUM(oi.marketplace_fee_minor),0) marketplace_fees_minor,COALESCE(SUM(COALESCE(oi.actual_processor_fee_minor,oi.stripe_fee_minor)),0) processor_fees_minor,COALESCE(SUM(COALESCE(oi.actual_fulfillment_cost_minor,oi.estimated_fulfillment_cost_minor)),0) fulfillment_cost_minor FROM order_items oi JOIN orders o ON o.id=oi.order_id JOIN editions e ON e.id=oi.edition_id JOIN books b ON b.id=e.book_id LEFT JOIN listings l ON l.book_id=b.id WHERE oi.author_id=? AND o.created_at>=? AND o.payment_status IN ('paid','succeeded','partially_refunded') GROUP BY b.id,COALESCE(l.display_title,b.title) ORDER BY gross_minor DESC`).bind(authorId,start));
+  return rows.map(r=>({bookId:r.book_id,title:r.title,orders:Number(r.orders||0),units:Number(r.units||0),grossMinor:Number(r.gross_minor||0),refundsMinor:Number(r.refunds_minor||0),marketplaceFeesMinor:Number(r.marketplace_fees_minor||0),processorFeesMinor:Number(r.processor_fees_minor||0),fulfillmentCostMinor:Number(r.fulfillment_cost_minor||0)}));
+}
+
+async function analyticsBrainForAuthor(env,authorId,days=30){
+  days=Math.max(7,Math.min(180,Number(days)||30));
+  const [current,wide]=await Promise.all([authorStats(env,authorId,days),authorStats(env,authorId,days*2)]);
+  const previous=subtractStats(wide.totals,current.totals),previousFormats=subtractFormats(wide.formats,current.formats);
+  const [daily,books]=await Promise.all([analyticsDailyRows(env,authorId,current.period.start),analyticsBookRows(env,authorId,current.period.start)]);
+  const brain=buildAnalyticsBrain({current:current.totals,previous,formats:current.formats,marketing:current.marketing,daily,books});
+  const states=await all(env.DB.prepare(`SELECT signal_key,status,dismissed_at,snoozed_until,note FROM analytics_signal_state WHERE author_id=?`).bind(authorId));const stateMap=new Map(states.map(x=>[x.signal_key,x]));
+  brain.signals=brain.signals.map(x=>({...x,state:stateMap.get(x.key)?.status||'open',dismissedAt:stateMap.get(x.key)?.dismissed_at||null,snoozedUntil:stateMap.get(x.key)?.snoozed_until||null}));
+  brain.attention=brain.signals.find(x=>x.state==='open')||brain.signals[0]||null;
+  return {...brain,period:current.period,previousFormats,externalChannels:current.externalChannels,marketing:current.marketing};
+}
+
+async function persistAnalyticsBrain(env,authorId,brain){
+  const stamp=now(),id=uuid();
+  await env.DB.prepare(`INSERT INTO analytics_brain_runs (id,author_id,period_days,period_start,period_end,brain_version,result_json,created_at) VALUES (?,?,?,?,?,?,?,?)`).bind(id,authorId,brain.period.days,brain.period.start,brain.period.end,brain.version,JSON.stringify(brain),stamp).run();
+  for(const s of brain.signals) await env.DB.prepare(`INSERT INTO analytics_signal_state (author_id,signal_key,status,first_seen_at,last_seen_at) VALUES (?,?,'open',?,?) ON CONFLICT(author_id,signal_key) DO UPDATE SET last_seen_at=excluded.last_seen_at`).bind(authorId,s.key,stamp,stamp).run();
+  return {runId:id,createdAt:stamp};
+}
+
 async function validateCart(env,rawItems){
   const requested=(rawItems||[]).map(x=>({editionId:String(x.editionId||''),quantity:clampQty(x.quantity)})).filter(x=>x.editionId);
   if(!requested.length) throw new Error('items_required');
@@ -395,7 +427,7 @@ async function marketingShortRedirect(request,env){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.9.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.10.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -486,6 +518,13 @@ async function api(request,env){
       const rows=await all(env.DB.prepare(`SELECT id,listing_revision,change_type,changed_fields_json,created_at FROM catalog_change_history WHERE book_id=? AND author_id=? ORDER BY created_at DESC LIMIT 100`).bind(bookId,author.id));return json({ok:true,bookId,history:rows.map(r=>({...r,changedFields:JSON.parse(r.changed_fields_json||'[]')}))});
     }
     if(path==='/api/me/stats'&&request.method==='GET') return json({ok:true,...await authorStats(env,author.id,url.searchParams.get('days')||30)});
+    if(path==='/api/me/analytics-brain'&&request.method==='GET') return json({ok:true,brain:await analyticsBrainForAuthor(env,author.id,url.searchParams.get('days')||30)});
+    if(path==='/api/me/analytics-brain/refresh'&&request.method==='POST'){
+      const brain=await analyticsBrainForAuthor(env,author.id,url.searchParams.get('days')||30),saved=await persistAnalyticsBrain(env,author.id,brain);return json({ok:true,brain,...saved},201);
+    }
+    if(path.match(/^\/api\/me\/analytics-signals\/[^/]+\/dismiss$/)&&request.method==='POST'){
+      const key=decodeURIComponent(path.split('/')[4]),stamp=now();await env.DB.prepare(`INSERT INTO analytics_signal_state (author_id,signal_key,status,first_seen_at,last_seen_at,dismissed_at) VALUES (?,?,'dismissed',?,?,?) ON CONFLICT(author_id,signal_key) DO UPDATE SET status='dismissed',dismissed_at=excluded.dismissed_at,last_seen_at=excluded.last_seen_at`).bind(author.id,key,stamp,stamp,stamp).run();return json({ok:true,signalKey:key,status:'dismissed'});
+    }
 
     if(path==='/api/me/campaigns'&&request.method==='GET'){
       const rows=await all(env.DB.prepare(`SELECT c.*,b.title,b.slug FROM campaigns c LEFT JOIN books b ON b.id=c.book_id WHERE c.author_id=? ORDER BY c.created_at DESC`).bind(author.id));
@@ -536,7 +575,8 @@ async function api(request,env){
 
     if(path==='/api/me/business-export'&&request.method==='GET'){
       const stats=await authorStats(env,author.id,url.searchParams.get('days')||30);
-      const exportData=buildBusinessExport({author,period:stats.period,totals:stats.totals,formats:stats.formats,campaigns:stats.campaigns,channels:stats.externalChannels,marketing:stats.marketing});
+      const brain=await analyticsBrainForAuthor(env,author.id,url.searchParams.get('days')||30);
+      const exportData=buildBusinessExport({author,period:stats.period,totals:stats.totals,formats:stats.formats,campaigns:stats.campaigns,channels:stats.externalChannels,marketing:stats.marketing,analytics:{version:brain.version,economics:brain.economics,comparison:brain.comparison,signals:brain.signals.map(x=>({key:x.key,category:x.category,severity:x.severity,title:x.title,state:x.state})),books:brain.books.map(x=>({bookId:x.bookId,title:x.title,contributionMinor:x.contributionMinor,contributionMargin:x.contributionMargin}))}});
       return json({ok:true,export:exportData});
     }
     if(path==='/api/me/stripe/status'&&request.method==='GET'){
@@ -772,6 +812,6 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(url.pathname.startsWith('/r/')) return marketingShortRedirect(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.9.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.10.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

@@ -1,69 +1,92 @@
-# Marketplace | YasReady v0.9.0
+# Marketplace | YasReady v0.10.0
 
-**Marketing Studio**
+**Analytics Brain**
 
-Marketplace remains the standalone commerce/discovery product at `marketplace.yasready.com`. v0.9 keeps the v0.8 reader foundation, v0.7 catalog management and all prior commerce/provider boundaries, then turns the existing attribution plumbing into a real indie-author marketing workspace.
+Marketplace | YasReady is the commerce, discovery, promotion and reader-entitlement layer that sits after Publishing | YasReady. v0.10 keeps the v0.6 YasReady operating shell, v0.7 catalog editor, v0.8 consumer/library foundation and v0.9 Marketing Studio, then adds an explainable analytics layer for authors.
 
-## What changed in v0.9
+## What is new in 0.10.0
 
-Marketing Studio now treats promotion as part of publishing instead of something the author has to assemble after launch. A book can generate one campaign and reuse that campaign identity across a trackable link, QR code, website button/embed, social copy, email copy, event copy and launch checklist.
+### Analytics Brain workspace
 
-Campaign performance keeps visits, orders, conversion, attributed revenue, optional author-entered spend and ROAS together. Free channels remain fully supported; an author never has to enter spend to use the tools.
+A new **Insights** workspace compares the current period with the immediately preceding comparable period and highlights the small number of things that deserve attention instead of making authors interpret a wall of charts.
 
-### New Marketing Studio foundation
+It covers:
 
-- campaign objectives and optional budget/spend
-- one-click campaign asset bundles
-- launch kits and checklists
-- Marketplace-owned short-link records + redirect tracking
-- campaign-cost ledger
-- conversion, revenue-per-visit and ROAS math
-- evidence-based “YasReady Signal” recommendations
-- campaign performance by channel
-- marketing data included in the Business export seam
+- gross Marketplace sales
+- orders, units, listing views and conversion
+- period-over-period movement
+- tracked direct-sale contribution and contribution margin
+- refunds and fulfillment-cost pressure
+- format mix and concentration
+- book-level direct-sale economics
+- campaign spend, conversion and ROAS signals
+- daily trend direction and unusual spikes/drops
+- dismissible evidence-based YasReady Signals
 
-### New/expanded APIs
+### Contribution is deliberately not called net profit
 
-- `GET /api/me/marketing-studio/:bookId`
-- `POST /api/me/campaigns` (objective/budget aware)
-- `POST /api/me/marketing-studio/:bookId/short-links`
-- `POST /api/me/marketing-studio/:bookId/costs`
-- `GET /r/:slug` (tracked redirect)
+Marketplace only knows Marketplace selling costs. v0.10 calculates:
 
-v0.9 does **not** post to social networks, buy ads or spend money for an author. The author owns the campaign; YasReady provides the assets, attribution and evidence.
+`gross - refunds - Marketplace fee - processor fees - fulfillment - tracked campaign spend`
 
-## Existing systems preserved
+The UI labels that value **Tracked contribution**. Full-company profit belongs in Business | YasReady, where editing, design, software, payroll, tax and other expenses can be included.
 
-- v0.8 reader discovery, library, saved/recent titles and YasReady. Books data contract
-- v0.7 catalog drafts, autosave, preview, validation and audit history
-- v0.6 YasReady author operating shell
-- v0.5 signed Publishing handshake and explicit author launch gate
-- v0.4 Ingram bridge/provider operations
-- v0.3 Stripe/settlement/refund/payout accounting model
+### Business-ready intelligence
 
-Publishing remains a separate repo and is not modified by this package.
+`GET /api/me/business-export` now carries a normalized analytics object in addition to sales, format, channel and Marketing Studio data. This preserves the architecture:
+
+**Publishing | YasReady → Marketplace | YasReady → Business | YasReady**
+
+## New API surface
+
+- `GET /api/me/analytics-brain?days=30`
+- `POST /api/me/analytics-brain/refresh?days=30`
+- `POST /api/me/analytics-signals/:key/dismiss`
+
+## New persistence
+
+Migration `0012_analytics_brain.sql` adds:
+
+- `analytics_brain_runs`
+- `analytics_signal_state`
+- `analytics_daily_rollups`
+
+The daily-rollup table is reserved as a future cache/aggregation layer; the current brain can still compute from canonical commerce/events data.
+
+## Existing product layers preserved
+
+- shared YasReady identity; no second author login
+- Publishing handoff with author-controlled go-live gate
+- real catalog drafts/autosave/history
+- public discovery + author/series storefronts
+- saved/recent/library/progress data for future **YasReady. Books**
+- Marketing Studio campaign links, QR, embeds, launch kits, spend and attribution
+- Stripe/Connect test architecture
+- Ingram bridge + fail-closed provider operations
+- Business export seam
 
 ## Quick preview
 
 Double-click:
 
-```bash
-SHOWCASE.command
-```
+`SHOWCASE.command`
 
-The no-install preview now opens the v0.9 Marketing Studio.
+This opens the no-install v0.10 Analytics Brain preview.
 
-## Verification
+## Local verification
 
 ```bash
-npm test
-./MARKETING_VERIFY.command
-./CONSUMER_VERIFY.command
-./UI_CLOSURE_VERIFY.command
-./YASREADY_STYLE_VERIFY.command
-./PAGES_VERIFY.command
-./PUBLISHING_HANDSHAKE_VERIFY.command
-./CATALOG_VERIFY.command
+npm install
+npm run test
+npm run verify:analytics
+npm run verify:ui
+npm run verify:catalog
+npm run verify:consumer
+npm run verify:marketing
+npm run verify:style
+npm run verify:pages
+npm run verify:publishing
+npm run build
 ```
 
-See `BUILD_REPORT.md` for the exact verified state.
+Live checkout, payouts, refunds, Ingram submission and Publishing import remain fail-closed until intentionally configured.

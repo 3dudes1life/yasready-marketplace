@@ -64,3 +64,21 @@ export const campaigns=[
   {id:'camp-email',bookId:'taul-2',name:'Reader Email',source:'email',objective:'sales',clicks:186,visits:186,orders:14,revenue:284.86,cost:0,conversion:7.53},
   {id:'camp-author-site',bookId:'taul-1',name:'Author Site Button',source:'author-site',objective:'evergreen',clicks:221,visits:221,orders:7,revenue:149.93,cost:0,conversion:3.17}
 ];
+
+export const analyticsSeed={
+  current:{orders:123,units:137,grossSalesMinor:248641,marketplaceFeesMinor:12432,processorFeesMinor:7460,fulfillmentCostMinor:51740,refundsMinor:3200,disputedMinor:0,transferredMinor:52340,sellerPayableMinor:162174,views:2367,conversionRate:5.2,currency:'usd'},
+  previous:{orders:101,units:114,grossSalesMinor:197800,marketplaceFeesMinor:9890,processorFeesMinor:5980,fulfillmentCostMinor:45200,refundsMinor:1800,disputedMinor:0,transferredMinor:41100,sellerPayableMinor:130200,views:2260,conversionRate:4.47,currency:'usd'},
+  formats:[{format:'Paperback',units:74,grossMinor:134266},{format:'Ebook',units:40,grossMinor:72106},{format:'Audiobook',units:23,grossMinor:42269}],
+  marketing:{costMinor:6300,campaigns:[
+    {id:'camp-instagram-launch',name:'Book Two Launch',source:'instagram',visits:598,orders:18,revenueMinor:35682,refundsMinor:0,costMinor:4500,netRevenueMinor:35682,conversionRate:3.01,roas:7.93},
+    {id:'camp-event-qr',name:'Pride Event QR',source:'event-qr',visits:109,orders:11,revenueMinor:20789,refundsMinor:0,costMinor:1800,netRevenueMinor:20789,conversionRate:10.09,roas:11.55},
+    {id:'camp-email',name:'Reader Email',source:'email',visits:186,orders:14,revenueMinor:28486,refundsMinor:0,costMinor:0,netRevenueMinor:28486,conversionRate:7.53,roas:null}
+  ]},
+  daily:[
+    {date:'2026-09-09',grossMinor:9400},{date:'2026-09-10',grossMinor:11200},{date:'2026-09-11',grossMinor:10600},{date:'2026-09-12',grossMinor:12800},{date:'2026-09-13',grossMinor:13400},{date:'2026-09-14',grossMinor:15100},{date:'2026-09-15',grossMinor:14200},{date:'2026-09-16',grossMinor:16200},{date:'2026-09-17',grossMinor:17400},{date:'2026-09-18',grossMinor:16800},{date:'2026-09-19',grossMinor:19300},{date:'2026-09-20',grossMinor:20700},{date:'2026-09-21',grossMinor:21600},{date:'2026-09-22',grossMinor:33100}
+  ],
+  books:[
+    {bookId:'taul-2',title:'Fault Lines',orders:69,units:76,grossMinor:139820,refundsMinor:1200,marketplaceFeesMinor:6991,processorFeesMinor:4190,fulfillmentCostMinor:28700},
+    {bookId:'taul-1',title:'Tres Amigos, Una Vida',orders:54,units:61,grossMinor:108821,refundsMinor:2000,marketplaceFeesMinor:5441,processorFeesMinor:3270,fulfillmentCostMinor:23040}
+  ]
+};

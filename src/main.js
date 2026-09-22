@@ -1,14 +1,15 @@
-import {account as demoAccount,books as demoBooks,dashboard as demoDashboard,campaigns as demoCampaigns} from './data/demo.js';
+import {account as demoAccount,books as demoBooks,dashboard as demoDashboard,campaigns as demoCampaigns,analyticsSeed} from './data/demo.js';
 import {track,campaignUrl} from './lib/analytics.js';
 import {authFetch} from './lib/session-client.js';
 import {launchKit,marketingRecommendation,campaignMetrics,channelConfig,assetPlan} from './lib/marketing-studio.mjs';
+import {buildAnalyticsBrain} from './lib/analytics-brain.mjs';
 
 const app=document.querySelector('#app');
 setTimeout(()=>setTheme(currentTheme()),0);
 const state={
   view:'store',filter:'All',query:'',selected:null,
   cart:JSON.parse(localStorage.getItem('yr.market.cart.v2')||'[]'),
-  account:{...demoAccount},books:[...demoBooks],dashboard:{...demoDashboard},campaigns:[...demoCampaigns],
+  account:{...demoAccount},books:[...demoBooks],dashboard:{...demoDashboard},campaigns:[...demoCampaigns],analyticsBrain:buildAnalyticsBrain(analyticsSeed),
   api:false,loading:false,catalogEditor:null,marketingBookId:'taul-2',campaignName:'Launch campaign',campaignSource:'instagram',campaignMedium:'social',campaignObjective:'launch',campaignBudget:0,
   publicAuthorHandle:null,publicSeries:null,
   reader:{saved:JSON.parse(localStorage.getItem('yr.market.saved.v1')||'["taul-2"]'),recent:JSON.parse(localStorage.getItem('yr.market.recent.v1')||'[]'),library:[{bookId:'taul-1',editionId:'taul1-ebook',format:'Ebook',percent:63},{bookId:'demo-3',editionId:'long-audio',format:'Audiobook',percent:34,secondsPosition:4280}]}
@@ -48,6 +49,7 @@ const navIcon=id=>{
     books:'<path d="M5 4.5h10a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3z"/><path d="M8 4.5v15.5"/><path d="M18 7.5h1a2 2 0 0 1 2 2V20h-3"/>',
     launch:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 18v3h14v-3"/>',
     sales:'<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M22 19V3"/>',
+    insights:'<path d="M4 18V10"/><path d="M10 18V6"/><path d="M16 18v-4"/><path d="M3 21h18"/><path d="m5 7 5-3 5 5 5-6"/>',
     commerce:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M7 15h4"/>',
     fulfillment:'<path d="M3 7.5 12 3l9 4.5-9 4.5z"/><path d="M3 7.5V17l9 4 9-4V7.5"/><path d="M12 12v9"/>',
     marketing:'<path d="m4 14 11-5v10L4 14z"/><path d="M15 11.5h3a3 3 0 0 1 0 6h-3"/><path d="m6 15 1.5 5h3L9 16"/>',
@@ -75,7 +77,7 @@ function coverTheme(b){return b.cover||({
 function cover(b,small=false){return `<div class="cover ${small?'small':''}" style="background:${coverTheme(b)}"><div class="coverTop">${b.series?esc(b.series):'YASREADY BOOKS'}</div><h3>${esc(b.title)}</h3><p>${esc(b.subtitle||b.author)}</p><span class="coverAuthor">${esc(b.author)}</span></div>`}
 
 function shell(){
-  const all=[['dashboard','Home'],['books','My Books'],['launch','Launch'],['sales','Sales'],['marketing','Promote'],['commerce','Commerce'],['fulfillment','Fulfillment'],['integrations','Connections']];
+  const all=[['dashboard','Home'],['books','My Books'],['launch','Launch'],['sales','Sales'],['insights','Insights'],['marketing','Promote'],['commerce','Commerce'],['fulfillment','Fulfillment'],['integrations','Connections']];
   if(isPublicView()){
     return `<div class="publicChrome">
       <div class="shell publicNav">
@@ -88,8 +90,8 @@ function shell(){
   const label=all.find(([id])=>id===state.view)?.[1]||'Home';
   const groups=[
     ['Workspace',all.slice(0,4)],
-    ['Grow',[all[4]]],
-    ['Operations',all.slice(5)]
+    ['Grow',[all[4],all[5]]],
+    ['Operations',all.slice(6)]
   ];
   return `<div class="creatorChrome">
     <aside class="yrSidebar" aria-label="Marketplace workspace navigation">
@@ -235,6 +237,41 @@ function salesView(){const d=state.dashboard;return `<main class="view creatorVi
 <section class="panel"><div class="panelHead"><div><span class="microLabel">ATTRIBUTION</span><h2>What actually sells books</h2></div></div><div class="sourceTable"><div class="sourceHead"><span>Source</span><span>Visits</span><span>Orders</span><span>Revenue</span><span>Conv.</span></div>${d.sources.map(x=>`<div class="sourceRow"><strong>${x.source}</strong><span>${x.visits.toLocaleString()}</span><span>${x.sales}</span><span>${money(x.revenue)}</span><span>${x.conversion}%</span></div>`).join('')}</div></section></div>
 <section class="panel ordersPanel"><div class="panelHead"><div><span class="microLabel">RECENT ORDERS</span><h2>Money and fulfillment stay separate</h2></div><span class="subtle">Payment state ≠ print state</span></div><div class="ordersTable"><div class="ordersHead"><span>Order</span><span>Book</span><span>Format</span><span>Gross</span><span>Your earnings</span><span>Status</span></div>${d.recentOrders.map(o=>`<div class="orderRow"><span><strong>${o.id}</strong><small>${o.when}</small></span><span>${esc(o.title)}</span><span>${o.format}</span><span>${money(o.gross)}</span><span>${money(o.earnings)}</span><span><i class="orderDot"></i>${o.status}</span></div>`).join('')}</div></section><section class="channelLane"><div><span class="microLabel">EXTERNAL SALES LANE</span><h3>Ingram network stats have their own pipe.</h3><p>External retailer/distribution reports land separately by provider, channel, ISBN, date and provenance. They can be shown alongside direct YasReady sales without quietly double-counting the same order.</p></div><div class="channelState"><span>Ingram</span><strong>Report adapter ready</strong><small>Import disabled until feed format + credentials are approved.</small></div></section></div></main>`}
 
+
+function changePill(value,suffix='%'){
+  if(value===null||value===undefined)return `<span class="delta neutral">New</span>`;
+  const n=Number(value)||0,cls=n>0?'up':n<0?'down':'neutral',arrow=n>0?'↑':n<0?'↓':'→';
+  return `<span class="delta ${cls}">${arrow} ${Math.abs(n).toFixed(1)}${suffix}</span>`;
+}
+function insightSignalCard(signal){
+  const tone={warning:'warning',attention:'attention',positive:'positive',info:'info'}[signal.severity]||'info';
+  return `<article class="brainSignal ${tone}"><div><span class="signalType">${esc(signal.category||'signal')}</span><h3>${esc(signal.title)}</h3><p>${esc(signal.detail)}</p></div><div class="signalActions"><span>${esc(signal.severity||'info')}</span>${signal.state==='dismissed'?'<small>Dismissed</small>':`<button data-dismiss-signal="${encodeURIComponent(signal.key)}">Dismiss</button>`}</div></article>`;
+}
+function insightsView(){
+  const b=state.analyticsBrain||buildAnalyticsBrain(analyticsSeed),e=b.economics||{},c=b.comparison?.changes||{},cur=b.current||{},prev=b.previous||{},attention=b.attention||b.signals?.[0];
+  const daily=(b.daily||[]).map(x=>Number(x.grossMinor||0));
+  const topFormat=b.formatMix?.top;
+  return `<main class="view creatorView analyticsBrain">${pageHead('Analytics Brain','Know what changed — and what deserves your attention.','Marketplace compares comparable periods, watches direct-sale economics, and turns sales, traffic, formats and campaign data into evidence-based signals.',`<button class="btn secondary" data-nav="sales">Raw sales</button><button class="btn primary" data-refresh-brain>Refresh analysis</button>`)}
+  <div class="shell">
+    <div class="metricsGrid five brainMetrics">${metric('Gross sales',moneyMinor(cur.grossSalesMinor||0),`${changePill(c.grossSalesMinor)}`,'purple')}${metric('Tracked contribution',moneyMinor(e.contributionMinor||0),`${Number(e.contributionMargin||0).toFixed(1)}% after tracked selling costs`,'limeCard')}${metric('Conversion',`${Number(cur.conversionRate||0).toFixed(2)}%`,`${changePill(c.conversionRate)}`)}${metric('Orders',Number(cur.orders||0).toLocaleString(),`${changePill(c.orders)}`)}${metric('Refund rate',`${Number(e.refundRate||0).toFixed(2)}%`,`${moneyMinor(e.refundsMinor||0)} refunded`)}</div>
+    ${attention?`<section class="brainHero ${esc(attention.severity||'info')}"><div><span class="microLabel">WHAT NEEDS ATTENTION</span><h2>${esc(attention.title)}</h2><p>${esc(attention.detail)}</p></div><span class="brainEvidence">Based on ${Number(cur.views||0).toLocaleString()} views · ${Number(cur.orders||0).toLocaleString()} orders</span></section>`:''}
+    <div class="twoCol brainTop"><section class="panel"><div class="panelHead"><div><span class="microLabel">PERIOD COMPARISON</span><h2>Current vs previous comparable period</h2></div><span class="subtle">${Number(b.period?.days||30)} days</span></div><div class="comparisonRows">
+      <div><span>Gross sales</span><strong>${moneyMinor(cur.grossSalesMinor||0)}</strong><small>${moneyMinor(prev.grossSalesMinor||0)} previous</small>${changePill(c.grossSalesMinor)}</div>
+      <div><span>Orders</span><strong>${Number(cur.orders||0).toLocaleString()}</strong><small>${Number(prev.orders||0).toLocaleString()} previous</small>${changePill(c.orders)}</div>
+      <div><span>Listing views</span><strong>${Number(cur.views||0).toLocaleString()}</strong><small>${Number(prev.views||0).toLocaleString()} previous</small>${changePill(c.views)}</div>
+      <div><span>Conversion</span><strong>${Number(cur.conversionRate||0).toFixed(2)}%</strong><small>${Number(prev.conversionRate||0).toFixed(2)}% previous</small>${changePill(c.conversionRate)}</div>
+    </div></section>
+    <section class="panel"><div class="panelHead"><div><span class="microLabel">TREND</span><h2>${b.trend?.direction==='up'?'Momentum is rising':b.trend?.direction==='down'?'Momentum is cooling':'Sales are holding steady'}</h2></div><span class="trendBadge ${b.trend?.direction||'flat'}">${b.trend?.direction||'flat'}</span></div>${sparkline(daily.length?daily:[1])}<div class="brainTrendFoot"><div><strong>${moneyMinor(b.trend?.averageMinor||0)}</strong><span>average day</span></div><div><strong>${moneyMinor(b.trend?.latestMinor||0)}</strong><span>latest day</span></div><div><strong>${topFormat?esc(topFormat.format):'—'}</strong><span>${topFormat?`${topFormat.share}% of sales`:'format leader'}</span></div></div></section></div>
+    <div class="twoCol brainMid"><section class="panel"><div class="panelHead"><div><span class="microLabel">DIRECT-SALE ECONOMICS</span><h2>What the Marketplace sale is leaving behind.</h2></div><span class="subtle">Not company net profit</span></div><div class="economicsWaterfall">
+      <div><span>Gross sales</span><strong>${moneyMinor(e.grossMinor||0)}</strong></div><div class="cost"><span>Refunds</span><strong>−${moneyMinor(e.refundsMinor||0)}</strong></div><div class="cost"><span>Marketplace fee</span><strong>−${moneyMinor(e.marketplaceFeesMinor||0)}</strong></div><div class="cost"><span>Processing</span><strong>−${moneyMinor(e.processorFeesMinor||0)}</strong></div><div class="cost"><span>Fulfillment</span><strong>−${moneyMinor(e.fulfillmentCostMinor||0)}</strong></div><div class="cost"><span>Tracked marketing spend</span><strong>−${moneyMinor(e.marketingSpendMinor||0)}</strong></div><div class="total"><span>Tracked contribution</span><strong>${moneyMinor(e.contributionMinor||0)}</strong></div>
+    </div><p class="helper">This is contribution after Marketplace-known selling costs. Editing, design, payroll, software, tax and other company expenses belong in Business | YasReady.</p></section>
+    <section class="panel"><div class="panelHead"><div><span class="microLabel">FORMAT MIX</span><h2>Where readers are spending.</h2></div></div><div class="formatMix">${(b.formatMix?.formats||[]).map(x=>`<div class="mixRow"><div><strong>${esc(formatLabel(x.format))}</strong><span>${moneyMinor(x.grossMinor)}</span></div><div class="mixTrack"><i style="width:${Math.max(2,x.share)}%"></i></div><b>${x.share}%</b></div>`).join('')||'<div class="emptyState">No format sales yet.</div>'}</div></section></div>
+    <section class="panel bookEconomics"><div class="panelHead"><div><span class="microLabel">BOOK ECONOMICS</span><h2>Which titles are carrying direct-sale contribution.</h2></div><span class="subtle">Tracked costs only</span></div><div class="brainTable"><div class="brainTableHead"><span>Book</span><span>Orders</span><span>Gross</span><span>Fulfillment</span><span>Contribution</span><span>Margin</span></div>${(b.books||[]).map(x=>`<div class="brainTableRow"><strong>${esc(x.title)}</strong><span>${Number(x.orders||0)}</span><span>${moneyMinor(x.grossMinor||0)}</span><span>${moneyMinor(x.fulfillmentCostMinor||0)}</span><span>${moneyMinor(x.contributionMinor||0)}</span><span>${Number(x.contributionMargin||0).toFixed(1)}%</span></div>`).join('')||'<div class="emptyState">No book economics yet.</div>'}</div></section>
+    <section class="panel signalsPanel"><div class="panelHead"><div><span class="microLabel">YASREADY SIGNALS</span><h2>Evidence before advice.</h2></div><span class="subtle">Dismiss what is not useful</span></div><div class="signalList">${(b.signals||[]).map(insightSignalCard).join('')}</div></section>
+    <section class="brainBusiness"><div><span class="microLabel">BUSINESS | YASREADY</span><h2>Marketplace knows the selling layer. Business can know the whole company.</h2><p>v0.10 exports contribution economics, period comparisons, title-level signals and campaign intelligence through the existing Marketplace → Business contract.</p></div><button class="btn light" data-export-business>Preview Business feed</button></section>
+  </div></main>`;
+}
+
 function commerceView(){
   const d=state.dashboard;
   const gross=d.grossSales||248641, earned=d.authorEarnings||189420;
@@ -295,7 +332,7 @@ function marketingView(){
 
 function embedCode(b){const url=`https://marketplace.yasready.com/book/${b.slug}`;return `<a href="${url}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#1d1d1f;color:#fff;text-decoration:none;font:700 15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">Buy ${b.title} on YasReady</a>`}
 
-function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','One YasReady account. Clean product boundaries.','v0.9.0 keeps identity, Publishing handoff, payments, fulfillment and Business analytics inside one consistent YasReady operating system.')}
+function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','One YasReady account. Clean product boundaries.','v0.10.0 adds the Analytics Brain while keeping identity, Publishing handoff, payments, fulfillment and Business analytics inside one consistent YasReady operating system.')}
 <div class="shell"><div class="integrationGrid">${integrationCard('Y','YasReady Account','Connected','The same central account used in Publishing becomes the Marketplace author identity. No second signup.','Shared identity','connected')}${integrationCard('S','Stripe Connect','Ready for test credentials','Express onboarding hooks, Checkout Sessions, webhooks, multi-seller allocation and reconciliation boundaries are in the Worker.','Payments + payouts','ready')}${integrationCard('I','Ingram','Partner-ready boundary','Share & Sell fallback plus metadata, stock, Consumer Direct Fulfillment and EDI lifecycle seams. Live fulfillment waits for an approved Ingram relationship.','Print fulfillment','ready')}${integrationCard('B','Business | YasReady','Export contract built','A normalized commercial feed already exposes gross sales, fees, fulfillment costs, author payable, formats and campaign performance.','Business intelligence','future')}</div>
 <section class="panel architecturePanel"><div class="panelHead"><div><span class="microLabel">PRODUCTION SAFETY</span><h2>Things that stay off until they’re real.</h2></div></div><div class="safetyGrid"><div><span class="offPill">OFF</span><strong>Live checkout</strong><p>`+'`CHECKOUT_ENABLED=false`'+` is the tracked default.</p></div><div><span class="offPill">OFF</span><strong>Stripe live mode</strong><p>Requires secret + webhook configuration.</p></div><div><span class="offPill">OFF</span><strong>Ingram order submission</strong><p>No undocumented API calls or fake credentials.</p></div><div><span class="offPill">OFF</span><strong>Publishing transport</strong><p>The signed receiving contract is built, but PUBLISHING_IMPORT_ENABLED=false remains the tracked default and author launch approval is separate.</p></div></div></section>
 <section class="panel dataContract"><div><div class="microLabel">BUSINESS HANDOFF</div><h2>Marketplace already knows the numbers Business will need.</h2><p>When Business is ready, it consumes a versioned Marketplace export instead of learning Marketplace’s internal database.</p></div><pre>{
@@ -329,11 +366,11 @@ function errorState(title='Something needs attention',copy='Marketplace could no
 }
 
 function render(){
-  const views={store:storeView,library:libraryView,saved:savedView,authorpage:authorPageView,seriespage:seriesPageView,dashboard:dashboardView,books:booksView,launch:launchView,sales:salesView,commerce:commerceView,fulfillment:fulfillmentView,marketing:marketingView,integrations:integrationsView};
+  const views={store:storeView,library:libraryView,saved:savedView,authorpage:authorPageView,seriespage:seriesPageView,dashboard:dashboardView,books:booksView,launch:launchView,sales:salesView,insights:insightsView,commerce:commerceView,fulfillment:fulfillmentView,marketing:marketingView,integrations:integrationsView};
   const creator=!isPublicView();
   document.body.classList.toggle('creator-ui',creator);document.body.classList.toggle('reader-ui',!creator);
   const footerCopy=creator?'Make it. Sell it. Understand it.':'Read. Listen. Discover independent stories.';
-  app.innerHTML=shell()+(state.loading?loadingState():(views[state.view]||storeView)())+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>${footerCopy}</p><span>v0.9.0 · Marketing Studio</span></div></footer>`+(state.selected?bookModal(state.selected):'')+(state.catalogEditor?catalogEditorModal():'');
+  app.innerHTML=shell()+(state.loading?loadingState():(views[state.view]||storeView)())+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>${footerCopy}</p><span>v0.10.0 · Analytics Brain</span></div></footer>`+(state.selected?bookModal(state.selected):'')+(state.catalogEditor?catalogEditorModal():'');
   bind();if(state.view==='marketing'&&!state.loading)setupMarketing();
 }
 
@@ -370,6 +407,8 @@ function bind(){
     try{const r=await authFetch(`/api/me/books/${encodeURIComponent(bookId)}/readiness`,{headers:{accept:'application/json'}}),d=await r.json();if(!r.ok)throw new Error(d.error||'readiness_failed');if(!d.readiness?.ready){toast(`Needs ${d.readiness?.errors?.length||1} fix${(d.readiness?.errors?.length||1)===1?'':'es'} before sale`);return;}const go=await authFetch(`/api/me/books/${encodeURIComponent(bookId)}/go-live`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({editionIds:d.readiness.eligibleEditionIds})}),g=await go.json();if(!go.ok)throw new Error(g.error||'go_live_failed');toast('Book is live on YasReady Marketplace');await hydrateFromApi();}catch(err){toast(String(err.message||err))}
   });
   document.querySelector('[data-export-business]')?.addEventListener('click',()=>{toast('Business export contract: yasready.marketplace.business.v1');track('business_export_previewed')});
+  document.querySelector('[data-refresh-brain]')?.addEventListener('click',async()=>{if(!state.api){state.analyticsBrain=buildAnalyticsBrain(analyticsSeed);toast('Analytics Brain refreshed in demo mode');render();return;}try{const r=await authFetch('/api/me/analytics-brain/refresh?days=30',{method:'POST'}),d=await r.json();if(!r.ok)throw new Error(d.error||'analytics_refresh_failed');state.analyticsBrain=d.brain;toast('Analytics Brain refreshed');render()}catch(err){toast(String(err.message||err))}});
+  document.querySelectorAll('[data-dismiss-signal]').forEach(x=>x.onclick=async()=>{const key=decodeURIComponent(x.dataset.dismissSignal);const sig=state.analyticsBrain?.signals?.find(s=>s.key===key);if(sig)sig.state='dismissed';if(state.analyticsBrain)state.analyticsBrain.attention=state.analyticsBrain.signals.find(s=>s.state!=='dismissed')||state.analyticsBrain.signals[0]||null;if(state.api)authFetch(`/api/me/analytics-signals/${encodeURIComponent(key)}/dismiss`,{method:'POST'}).catch(()=>{});toast('Signal dismissed');render()});
 }
 
 function bindCart(){
@@ -421,12 +460,12 @@ async function applyCatalogEditor(){const x=state.catalogEditor;if(!x)return;awa
 
 async function hydrateFromApi(){
   try{
-    const [catalogRes,sessionRes,myRes,libRes,savedRes,recentRes]=await Promise.all([fetch('/api/catalog',{headers:{accept:'application/json'}}),authFetch('/api/session',{headers:{accept:'application/json'}}),authFetch('/api/me/books',{headers:{accept:'application/json'}}),authFetch('/api/reader/library',{headers:{accept:'application/json'}}),authFetch('/api/reader/saved',{headers:{accept:'application/json'}}),authFetch('/api/reader/recent',{headers:{accept:'application/json'}})]);
+    const [catalogRes,sessionRes,myRes,libRes,savedRes,recentRes,brainRes]=await Promise.all([fetch('/api/catalog',{headers:{accept:'application/json'}}),authFetch('/api/session',{headers:{accept:'application/json'}}),authFetch('/api/me/books',{headers:{accept:'application/json'}}),authFetch('/api/reader/library',{headers:{accept:'application/json'}}),authFetch('/api/reader/saved',{headers:{accept:'application/json'}}),authFetch('/api/reader/recent',{headers:{accept:'application/json'}}),authFetch('/api/me/analytics-brain?days=30',{headers:{accept:'application/json'}})]);
     if(!catalogRes.ok||!sessionRes.ok) return;
-    const catalog=await catalogRes.json(),session=await sessionRes.json(),myPayload=myRes.ok?await myRes.json():{books:[]},libPayload=libRes.ok?await libRes.json():null,savedPayload=savedRes.ok?await savedRes.json():null,recentPayload=recentRes.ok?await recentRes.json():null;
+    const catalog=await catalogRes.json(),session=await sessionRes.json(),myPayload=myRes.ok?await myRes.json():{books:[]},libPayload=libRes.ok?await libRes.json():null,savedPayload=savedRes.ok?await savedRes.json():null,recentPayload=recentRes.ok?await recentRes.json():null,brainPayload=brainRes.ok?await brainRes.json():null;
     if(session.author){state.account={userId:session.identity.userId,name:session.author.displayName,email:session.author.email,authorId:session.author.id,handle:session.author.handle,bio:session.author.bio,websiteUrl:session.author.websiteUrl,storefrontTagline:session.author.storefrontTagline,sharedAccount:true};}
     const pub=(catalog.books||[]).map(adaptApiBook),owned=(myPayload.books||[]).map(b=>adaptApiBook({...b,author:{id:state.account.authorId,name:state.account.name,handle:state.account.handle}}));const merged=new Map(pub.map(b=>[b.id,b]));for(const b of owned)merged.set(b.id,b);if(merged.size)state.books=[...merged.values()];
-    const mine=state.books.filter(b=>b.authorId===state.account.authorId);if(mine[0])state.marketingBookId=mine[0].id;if(libPayload?.items?.length)state.reader.library=libPayload.items.map(i=>({bookId:i.book_id,editionId:i.edition_id,format:formatLabel(i.format),percent:Number(i.percent||0),secondsPosition:i.seconds_position||null}));if(savedPayload?.books)state.reader.saved=savedPayload.books.map(b=>b.id);if(recentPayload?.books)state.reader.recent=recentPayload.books.map(b=>b.id);persistReader();
+    const mine=state.books.filter(b=>b.authorId===state.account.authorId);if(mine[0])state.marketingBookId=mine[0].id;if(libPayload?.items?.length)state.reader.library=libPayload.items.map(i=>({bookId:i.book_id,editionId:i.edition_id,format:formatLabel(i.format),percent:Number(i.percent||0),secondsPosition:i.seconds_position||null}));if(savedPayload?.books)state.reader.saved=savedPayload.books.map(b=>b.id);if(recentPayload?.books)state.reader.recent=recentPayload.books.map(b=>b.id);if(brainPayload?.brain)state.analyticsBrain=brainPayload.brain;persistReader();
     state.api=true;render();
   }catch{}
 }
