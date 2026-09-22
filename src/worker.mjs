@@ -2,6 +2,7 @@ import {sellerPayable} from './lib/money.mjs';
 import {stripeAllocationPlan} from './lib/providers.mjs';
 import {getIdentity,publicIdentity} from './lib/auth.mjs';
 import {buildBusinessExport} from './lib/business.mjs';
+import {BUSINESS_BRIDGE_SCHEMA,BUSINESS_CONSUMER_DEFAULT,businessBridgeCapabilities,normalizeBusinessCursor,normalizeBusinessLimit,normalizeBusinessAck,buildBusinessSnapshot,buildBusinessChangeBatch,businessSyncSummary} from './lib/business-bridge.mjs';
 import {buildCampaignUrl,buildEmbedHtml,socialCopy} from './lib/marketing.mjs';
 import {ingramCapabilities,buildPurchaseOrderDocument,normalizeIngramDocument} from './lib/ingram.mjs';
 import {ingramReadiness,normalizeInventoryRow,normalizeMetadataRow,normalizeInvoice,nextRetrySeconds,normalizeBridgeError,validatePhysicalOrder} from './lib/ingram-bridge.mjs';
@@ -30,6 +31,8 @@ function requireAdmin(request,env){
   return !!env.COMMERCE_ADMIN_SECRET&&secret===env.COMMERCE_ADMIN_SECRET;
 }
 function requireProviderSecret(request,env){return !!env.PROVIDER_IMPORT_SECRET&&request.headers.get('x-yasready-provider-secret')===env.PROVIDER_IMPORT_SECRET;}
+function requireBusinessSecret(request,env){const secret=request.headers.get('x-yasready-business-secret')||request.headers.get('authorization')?.replace(/^Bearer\s+/i,'');return !!env.BUSINESS_BRIDGE_SECRET&&secret===env.BUSINESS_BRIDGE_SECRET;}
+function businessServiceGuard(request,env){if(env.BUSINESS_BRIDGE_ENABLED!=='true')return json({ok:false,error:'business_bridge_disabled',...businessBridgeCapabilities(env)},503);if(!env.BUSINESS_BRIDGE_SECRET)return json({ok:false,error:'business_bridge_secret_missing'},503);if(!requireBusinessSecret(request,env))return json({ok:false,error:'unauthorized_business_bridge'},401);return null;}
 function safeAddress(raw){try{return raw?JSON.parse(raw):null}catch{return null}}
 
 const PUBLISHING_LIVE_SCENARIOS=[
@@ -328,6 +331,26 @@ async function commerceSummary(env,authorId){
   return sellerBalance({earnedMinor:earned?.earned,refundedMinor:earned?.refunded,adjustmentsMinor:earned?.adjustments,transferredMinor:transfers?.transferred,reversedMinor:transfers?.reversed});
 }
 
+async function businessSettlementState(env,authorId){
+  const allocations=await env.DB.prepare(`SELECT COUNT(*) allocations,COALESCE(SUM(gross_minor),0) gross_minor,COALESCE(SUM(marketplace_fee_minor),0) marketplace_fee_minor,COALESCE(SUM(processor_fee_minor),0) processor_fee_minor,COALESCE(SUM(fulfillment_cost_minor),0) fulfillment_cost_minor,COALESCE(SUM(refunded_minor),0) refunded_minor,COALESCE(SUM(disputed_minor),0) disputed_minor,COALESCE(SUM(payable_minor),0) payable_minor FROM settlement_allocations WHERE author_id=?`).bind(authorId).first();
+  const payouts=await env.DB.prepare(`SELECT COUNT(*) payout_count,COALESCE(SUM(CASE WHEN status IN ('paid','succeeded') THEN amount_minor ELSE 0 END),0) paid_minor,COALESCE(SUM(CASE WHEN status IN ('pending','created','processing') THEN amount_minor ELSE 0 END),0) pending_minor FROM payouts WHERE author_id=?`).bind(authorId).first();
+  const balance=await commerceSummary(env,authorId);
+  return {balance,allocations:{count:Number(allocations?.allocations||0),grossMinor:Number(allocations?.gross_minor||0),marketplaceFeeMinor:Number(allocations?.marketplace_fee_minor||0),processorFeeMinor:Number(allocations?.processor_fee_minor||0),fulfillmentCostMinor:Number(allocations?.fulfillment_cost_minor||0),refundedMinor:Number(allocations?.refunded_minor||0),disputedMinor:Number(allocations?.disputed_minor||0),payableMinor:Number(allocations?.payable_minor||0)},payouts:{count:Number(payouts?.payout_count||0),paidMinor:Number(payouts?.paid_minor||0),pendingMinor:Number(payouts?.pending_minor||0)}};
+}
+
+async function businessSnapshotForAuthor(env,author,{days=30}={}){
+  // Capture the cursor before the snapshot. Concurrent writes can therefore be replayed, never skipped.
+  const cursorRow=await env.DB.prepare(`SELECT COALESCE(MAX(seq),0) seq FROM business_sync_events WHERE author_id=?`).bind(author.id).first(),throughSequence=Number(cursorRow?.seq||0);
+  const [stats,brain,settlementState]=await Promise.all([authorStats(env,author.id,days),analyticsBrainForAuthor(env,author.id,days),businessSettlementState(env,author.id)]);
+  return buildBusinessSnapshot({author,period:stats.period,totals:stats.totals,formats:stats.formats,campaigns:stats.campaigns,channels:stats.externalChannels,marketing:stats.marketing,analytics:{version:brain.version,economics:brain.economics,comparison:brain.comparison,signals:brain.signals.map(x=>({key:x.key,category:x.category,severity:x.severity,title:x.title,state:x.state})),books:brain.books.map(x=>({bookId:x.bookId,title:x.title,contributionMinor:x.contributionMinor,contributionMargin:x.contributionMargin}))},settlements:{balance:settlementState.balance,allocations:settlementState.allocations},payouts:settlementState.payouts,throughSequence});
+}
+
+async function businessChangesForAuthor(env,author,{after=0,limit=100}={}){
+  after=normalizeBusinessCursor(after);limit=normalizeBusinessLimit(limit);
+  const rows=await all(env.DB.prepare(`SELECT seq,change_id,event_type,object_type,object_id,occurred_at,payload_json FROM business_sync_events WHERE author_id=? AND seq>? ORDER BY seq LIMIT ?`).bind(author.id,after,limit+1));
+  const hasMore=rows.length>limit,selected=rows.slice(0,limit),batch=buildBusinessChangeBatch({author,after,rows:selected});batch.sync.hasMore=hasMore;return batch;
+}
+
 async function uniqueBookSlug(env,base,excludeBookId=null){
   const root=slugify(base); let candidate=root, n=2;
   while(true){
@@ -529,7 +552,7 @@ async function ingramOperationsSnapshot(env,authorId=null){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.13.0',commerce:commerceReadiness(env),stripeTest:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.14.0',commerce:commerceReadiness(env),stripeTest:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),businessBridge:businessBridgeCapabilities(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -553,6 +576,35 @@ async function api(request,env){
 
   if(path==='/api/events'&&request.method==='POST'){
     const event=await safeJson(request); if(!event?.type) return json({ok:false,error:'invalid_event'},400); await writeEvent(env,event); return json({ok:true});
+  }
+
+  // Service-to-service bridge for Business | YasReady. Disabled and secret-gated by default.
+  if(path.startsWith('/api/internal/business/')){
+    const guard=businessServiceGuard(request,env);if(guard)return guard;
+    const internalBody=request.method==='POST'?(await safeJson(request)||{}):{};
+    const userId=url.searchParams.get('userId')||internalBody.userId||null;
+    if(!userId)return json({ok:false,error:'user_id_required'},400);
+    const author=await env.DB.prepare(`SELECT * FROM authors WHERE user_id=? LIMIT 1`).bind(userId).first();if(!author)return json({ok:false,error:'marketplace_author_not_found'},404);
+    if(path==='/api/internal/business/snapshot'&&request.method==='GET'){
+      const snapshot=await businessSnapshotForAuthor(env,author,{days:url.searchParams.get('days')||30}),runId=uuid(),stamp=now();
+      await env.DB.prepare(`INSERT INTO business_sync_runs (id,author_id,consumer_key,schema_version,from_sequence,through_sequence,row_count,status,generated_at,summary_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(runId,author.id,url.searchParams.get('consumerKey')||BUSINESS_CONSUMER_DEFAULT,BUSINESS_BRIDGE_SCHEMA,0,snapshot.sync.throughSequence,0,'snapshot_generated',stamp,JSON.stringify(businessSyncSummary({snapshot}))).run();
+      await env.DB.prepare(`INSERT INTO business_export_runs (id,author_id,period_start,period_end,schema_version,generated_at,summary_json) VALUES (?,?,?,?,?,?,?)`).bind(uuid(),author.id,snapshot.period.start,snapshot.period.end,BUSINESS_BRIDGE_SCHEMA,stamp,JSON.stringify(businessSyncSummary({snapshot}))).run();
+      return json({ok:true,runId,snapshot});
+    }
+    if(path==='/api/internal/business/changes'&&request.method==='GET'){
+      const batch=await businessChangesForAuthor(env,author,{after:url.searchParams.get('after'),limit:url.searchParams.get('limit')}),runId=uuid(),stamp=now();
+      await env.DB.prepare(`INSERT INTO business_sync_runs (id,author_id,consumer_key,schema_version,from_sequence,through_sequence,row_count,status,generated_at,summary_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(runId,author.id,url.searchParams.get('consumerKey')||BUSINESS_CONSUMER_DEFAULT,BUSINESS_BRIDGE_SCHEMA,batch.sync.after,batch.sync.nextCursor,batch.changes.length,'changes_generated',stamp,JSON.stringify({hasMore:batch.sync.hasMore,eventTypes:[...new Set(batch.changes.map(x=>x.eventType))]})).run();
+      return json({ok:true,runId,batch});
+    }
+    if(path==='/api/internal/business/ack'&&request.method==='POST'){
+      const body=internalBody;let ack;try{ack=normalizeBusinessAck(body)}catch(err){return json({ok:false,error:String(err.message||err)},400)}
+      const maxRow=await env.DB.prepare(`SELECT COALESCE(MAX(seq),0) seq FROM business_sync_events WHERE author_id=?`).bind(author.id).first(),maxSeq=Number(maxRow?.seq||0);if(ack.throughSequence>maxSeq)return json({ok:false,error:'ack_cursor_ahead_of_marketplace',maxSequence:maxSeq},409);
+      const id=`biz-consumer:${author.id}:${ack.consumerKey}`.slice(0,240),stamp=now();
+      await env.DB.prepare(`INSERT INTO business_sync_consumers (id,author_id,consumer_key,schema_version,last_sequence,status,last_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,'active',?,?,?) ON CONFLICT(author_id,consumer_key) DO UPDATE SET schema_version=excluded.schema_version,last_sequence=CASE WHEN excluded.last_sequence>business_sync_consumers.last_sequence THEN excluded.last_sequence ELSE business_sync_consumers.last_sequence END,last_synced_at=excluded.last_synced_at,updated_at=excluded.updated_at`).bind(id,author.id,ack.consumerKey,BUSINESS_BRIDGE_SCHEMA,ack.throughSequence,stamp,stamp,stamp).run();
+      await env.DB.prepare(`UPDATE business_sync_runs SET acknowledged_at=?,status='acknowledged' WHERE author_id=? AND consumer_key=? AND through_sequence<=? AND acknowledged_at IS NULL`).bind(stamp,author.id,ack.consumerKey,ack.throughSequence).run();
+      return json({ok:true,schema:BUSINESS_BRIDGE_SCHEMA,consumerKey:ack.consumerKey,acknowledgedThrough:ack.throughSequence});
+    }
+    return json({ok:false,error:'business_bridge_route_not_found'},404);
   }
 
   if(path==='/api/session'&&request.method==='GET'){
@@ -723,6 +775,15 @@ async function api(request,env){
       const orderId=decodeURIComponent(path.slice('/api/me/refund-request/'.length)); const owned=await env.DB.prepare(`SELECT 1 ok FROM order_items WHERE order_id=? AND author_id=? LIMIT 1`).bind(orderId,author.id).first(); if(!owned)return json({ok:false,error:'order_not_owned'},403);
       const body=await safeJson(request); const id=await openCommerceException(env,{orderId,authorId:author.id,provider:'stripe',code:'author_refund_request',title:'Author requested refund review',detail:body?.reason||'Author requested a refund review.',metadata:{requestedAmountMinor:body?.amountMinor??null}}); return json({ok:true,requestId:id,status:'queued_for_review'},202);
     }
+
+    if(path==='/api/me/business-bridge/status'&&request.method==='GET'){
+      const maxRow=await env.DB.prepare(`SELECT COALESCE(MAX(seq),0) seq,COUNT(*) count FROM business_sync_events WHERE author_id=?`).bind(author.id).first();
+      const consumers=await all(env.DB.prepare(`SELECT consumer_key,schema_version,last_sequence,status,last_synced_at,updated_at FROM business_sync_consumers WHERE author_id=? ORDER BY updated_at DESC`).bind(author.id));
+      const lastRun=await env.DB.prepare(`SELECT id,consumer_key,from_sequence,through_sequence,row_count,status,generated_at,acknowledged_at FROM business_sync_runs WHERE author_id=? ORDER BY generated_at DESC LIMIT 1`).bind(author.id).first();
+      return json({ok:true,...businessBridgeCapabilities(env),events:{count:Number(maxRow?.count||0),latestSequence:Number(maxRow?.seq||0)},consumers,lastRun:lastRun||null});
+    }
+    if(path==='/api/me/business-bridge/snapshot'&&request.method==='GET') return json({ok:true,snapshot:await businessSnapshotForAuthor(env,author,{days:url.searchParams.get('days')||30})});
+    if(path==='/api/me/business-bridge/changes'&&request.method==='GET') return json({ok:true,batch:await businessChangesForAuthor(env,author,{after:url.searchParams.get('after'),limit:url.searchParams.get('limit')})});
 
     if(path==='/api/me/business-export'&&request.method==='GET'){
       const stats=await authorStats(env,author.id,url.searchParams.get('days')||30);
@@ -1020,6 +1081,6 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(url.pathname.startsWith('/r/')) return marketingShortRedirect(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.13.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.14.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

@@ -1,41 +1,34 @@
-Marketplace | YasReady v0.13.0 PATCH FROM v0.12.0
+Marketplace | YasReady v0.14.0 PATCH FROM v0.13.0
 
-Patch files: 32
+Patch files: 24
 
 CHANGED  .env.example
 CHANGED  BUILD_REPORT.md
-CHANGED  CATALOG_VERIFY.command
+NEW      BUSINESS_BRIDGE_VERIFY.command
 CHANGED  CHANGELOG.md
-CHANGED  COMMERCE_PRO_VERIFY.command
-CHANGED  CONSUMER_VERIFY.command
-CHANGED  INGRAM_OPERATIONS_VERIFY.command
-CHANGED  MARKETING_VERIFY.command
 CHANGED  PREVIEW.html
-NEW      PUBLISHING_LIVE_TEST.command
-NEW      PUBLISHING_LIVE_VERIFY.command
 CHANGED  README.md
 CHANGED  SHOWCASE.command
-CHANGED  UI_CLOSURE_VERIFY.command
-CHANGED  YASREADY_STYLE_VERIFY.command
-NEW      docs/PUBLISHING-HANDSHAKE-LIVE-TEST.md
-NEW      examples/publishing-handoff-update.example.json
-NEW      migrations/0015_publishing_live_test.sql
+CHANGED  docs/BUSINESS-HANDOFF.md
+NEW      migrations/0016_business_intelligence_bridge.sql
 CHANGED  package.json
-NEW      scripts/publishing-live-test.mjs
 CHANGED  scripts/verify-analytics-brain.mjs
 CHANGED  scripts/verify-books-app.mjs
 CHANGED  scripts/verify-build.mjs
+NEW      scripts/verify-business-bridge.mjs
 CHANGED  scripts/verify-catalog.mjs
 CHANGED  scripts/verify-ingram-operations.mjs
 CHANGED  scripts/verify-marketing-studio.mjs
-NEW      scripts/verify-publishing-live.mjs
+CHANGED  scripts/verify-publishing-live.mjs
 CHANGED  scripts/verify-ui-closure.mjs
+NEW      src/lib/business-bridge.mjs
 CHANGED  src/main.js
 CHANGED  src/worker.mjs
-NEW      tests/publishing-live.test.mjs
+NEW      tests/business-bridge.test.mjs
 CHANGED  wrangler.jsonc
 
-Baseline required: v0.12.0
-Result after apply: v0.13.0
+Baseline required: v0.13.0
+Result after apply: v0.14.0
 No files are deleted by this patch.
-Migration added: migrations/0015_publishing_live_test.sql
+Migration added: migrations/0016_business_intelligence_bridge.sql
+Business service remains disabled until BUSINESS_BRIDGE_ENABLED=true and BUSINESS_BRIDGE_SECRET is configured.

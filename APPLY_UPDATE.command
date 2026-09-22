@@ -25,13 +25,13 @@ import json
 print(json.load(open(r'''$TARGET/package.json'''))['version'])
 PY
 )
-if [[ "$CURRENT_VERSION" != "0.12.0" ]]; then
-  echo "Expected v0.12.0 baseline, found v$CURRENT_VERSION in: $TARGET"
+if [[ "$CURRENT_VERSION" != "0.13.0" ]]; then
+  echo "Expected v0.13.0 baseline, found v$CURRENT_VERSION in: $TARGET"
   echo "Patch stopped before changing anything."
   exit 3
 fi
 
-echo "Applying Marketplace | YasReady v0.13.0 patch"
+echo "Applying Marketplace | YasReady v0.14.0 patch"
 echo "Baseline: v$CURRENT_VERSION"
 echo "Target:   $TARGET"
 
@@ -46,12 +46,20 @@ echo "Files applied. Running safe verification..."
 cd "$TARGET"
 node --check src/worker.mjs
 node --check src/main.js
+node --check src/lib/business-bridge.mjs
 npm test
+npm run verify:business-bridge
 npm run verify:publishing
 npm run verify:publishing-live
+npm run verify:books
+npm run verify:ingram-ops
 
 echo ""
-echo "PASS: Marketplace | YasReady is now v0.13.0"
-echo "New D1 migration is NOT applied automatically. When ready, run your normal migration command:"
+echo "PASS: Marketplace | YasReady is now v0.14.0"
+echo "New D1 migration is NOT applied automatically. When ready, run:"
 echo "  npm run db:migrate:local    # local"
-echo "  npm run db:migrate:remote   # remote, only when you intentionally want it"
+echo "  npm run db:migrate:remote   # remote, only when intentional"
+echo ""
+echo "Business service sync remains OFF until you deliberately configure:"
+echo "  BUSINESS_BRIDGE_ENABLED=true"
+echo "  BUSINESS_BRIDGE_SECRET=<secret>"

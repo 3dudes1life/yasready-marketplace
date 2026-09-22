@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 const root=new URL('../',import.meta.url);const read=p=>fs.readFileSync(new URL(p,root),'utf8');
 const checks=[
- ['version',read('package.json').includes('"version": "0.13.0"')],
+ ['version',read('package.json').includes('"version": "0.14.0"')],
  ['operations-lib',read('src/lib/ingram-operations.mjs').includes('INGRAM_OPERATIONS_SCHEMA')],
  ['mapping-table',read('migrations/0014_ingram_operations.sql').includes('provider_title_mappings')],
  ['reconciliation-cases',read('migrations/0014_ingram_operations.sql').includes('provider_reconciliation_cases')],

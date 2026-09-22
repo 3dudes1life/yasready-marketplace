@@ -1,5 +1,37 @@
 # Changelog
 
+## 0.14.0 — Business Intelligence Bridge
+
+### Versioned Business contract
+- Added `yasready.marketplace.business.v2` snapshot schema.
+- Added `yasready.marketplace.business.change.v1` incremental-event schema.
+- Same central YasReady user ID is the cross-product identity key.
+- Money remains integer minor units with explicit provenance.
+
+### Incremental sync
+- Added append-only `business_sync_events`.
+- Added per-consumer acknowledgement cursors in `business_sync_consumers`.
+- Added `business_sync_runs` for snapshot/change/ack evidence.
+- Added ledger, settlement, transfer, payout, external-sale, marketing-cost, campaign and Analytics Brain triggers.
+- Snapshot cursor is captured before aggregation so concurrent writes can replay but cannot be skipped.
+
+### APIs + UI
+- Added author Business Bridge status/snapshot/change preview APIs.
+- Added secret-gated internal Business snapshot/change/ack APIs.
+- Added a first-class Business workspace in the YasReady author shell.
+- Legacy Business v1 export remains available for compatibility.
+
+### Safety
+- `BUSINESS_BRIDGE_ENABLED=false` remains the tracked default.
+- Service sync also requires `BUSINESS_BRIDGE_SECRET`.
+- No Business integration gets direct Marketplace database access.
+
+### Preserved
+- v0.13 Publishing Handshake Live Test.
+- v0.12 Ingram Operations Closure.
+- v0.11 Stripe test commerce + hidden YasReady. Books bridge.
+- Analytics Brain, Marketing Studio, Consumer Marketplace, Catalog Management, GitHub Pages and YasReady visual parity.
+
 ## 0.13.0 — Publishing Handshake Live Test
 
 ### Publishing review gate

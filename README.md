@@ -1,87 +1,98 @@
-# Marketplace | YasReady v0.13.0
+# Marketplace | YasReady v0.14.0
 
-**Publishing Handshake Live Test**
+**Business Intelligence Bridge**
 
-v0.13 keeps the v0.12 Ingram Operations layer, v0.11 Stripe/Books bridge, and every existing Marketplace feature intact while closing the most important safety gap in the Publishing → Marketplace connection: **later production revisions no longer silently rewrite an existing Marketplace book.**
+v0.14 turns the old Marketplace → Business export seam into a real sync contract while preserving everything from v0.13 and the hidden YasReady. Books bridge.
 
-## What v0.13 adds
+## What v0.14 adds
 
-### Reviewable Publishing updates
-The first signed Publishing package can still create a Marketplace draft under the same YasReady account. Later changed revisions are now staged in `publishing_update_reviews`.
+### Business snapshot v2
+Business can receive a normalized commercial snapshot through:
 
-The author can see the field-level production diff and explicitly:
+`yasready.marketplace.business.v2`
 
-- **Apply production update**
-- **Reject update**
+The snapshot is keyed by the same central YasReady `userId` and includes:
 
-Publishing-owned production truth can change only after the review is applied. Marketplace-owned commercial truth—price, listing visibility, campaigns, live state, sales and analytics—remains protected.
+- direct Marketplace revenue
+- refunds and disputes
+- Marketplace fees
+- payment processor fees
+- fulfillment cost
+- author payable
+- transferred/payout amounts
+- order + unit counts
+- format mix
+- campaign performance
+- tracked marketing spend
+- Ingram / external-channel sales
+- settlement state
+- Analytics Brain signals
 
-### Separate production approval and sale approval
-Applying a production update does **not** put the book on sale.
+All money remains in integer minor units.
 
-The existing readiness + go-live gate remains separate:
+### Incremental change feed
+Business no longer has to repeatedly import the entire Marketplace history.
 
-1. Publishing sends production truth.
-2. Marketplace stages later revisions.
-3. Author approves/rejects the production update.
-4. Marketplace runs sale readiness.
-5. Author explicitly approves selected editions for sale.
+Marketplace now records append-only `business_sync_events` for commercial changes such as:
 
-Publishing still cannot push a book live.
+- ledger activity
+- settlement changes
+- transfers and payouts
+- external sales imports
+- campaign changes
+- marketing costs
+- Analytics Brain refreshes
 
-### Live-test tooling
-`PUBLISHING_LIVE_TEST.command` can exercise a running local/staging Worker end-to-end with a unique test book:
+Business asks for changes after its last sequence cursor, then acknowledges the highest sequence it processed.
 
-- signed handoff
-- first-draft creation
-- replay protection
-- second production revision
-- staged review diff
-- Marketplace price preservation
-- author apply
-- sale-readiness check
-- author go-live when eligible
+### No-lost-change snapshot boundary
+Marketplace captures the sync cursor **before** computing snapshot aggregates.
 
-`PUBLISHING_LIVE_VERIFY.command` verifies the architecture without requiring a running Worker.
+That means a transaction occurring during snapshot creation may be replayed in the incremental feed, but it cannot be silently skipped. The contract intentionally favors at-least-once delivery over lossy synchronization.
 
-### Evidence tables
-v0.13 adds:
+### Sync evidence
+New tables retain the integration trail:
 
-- `publishing_update_reviews`
-- `publishing_handshake_test_runs`
-- `publishing_handshake_test_events`
+- `business_sync_events`
+- `business_sync_consumers`
+- `business_sync_runs`
 
-These retain the review and certification trail instead of relying on screenshots or memory.
+The old `business_export_runs` evidence remains intact.
 
-## New/updated APIs
+### Fail-closed service access
+Author-side Business previews work immediately, but actual Business-to-Marketplace service sync remains OFF by default:
 
-- `GET /api/me/publishing/imports` now includes review state
-- `GET /api/me/books/:bookId/publishing-review`
-- `POST /api/me/books/:bookId/publishing-review/:reviewId/apply`
-- `POST /api/me/books/:bookId/publishing-review/:reviewId/reject`
-- `GET /api/admin/publishing/live-test/runs`
-- `POST /api/admin/publishing/live-test/run`
+- `BUSINESS_BRIDGE_ENABLED=false`
+- `BUSINESS_BRIDGE_SECRET` must be configured separately
 
-The signed receiver remains:
+## New APIs
 
-- `POST /api/integrations/publishing/handoff`
+Author preview:
 
-## Safety defaults
+- `GET /api/me/business-bridge/status`
+- `GET /api/me/business-bridge/snapshot`
+- `GET /api/me/business-bridge/changes`
 
-Tracked defaults remain fail-closed:
+Secret-gated service bridge:
 
-- `PUBLISHING_IMPORT_ENABLED=false`
-- `PUBLISHING_LIVE_TEST_ENABLED=false`
-- `CHECKOUT_ENABLED=false`
-- `STRIPE_MODE=off`
-- `INGRAM_MODE=off`
-- `BOOKS_APP_BRIDGE_ENABLED=false`
-- `BOOKS_APP_DELIVERY_ENABLED=false`
-- `BOOKS_APP_PUSH_ENABLED=false`
+- `GET /api/internal/business/snapshot?userId=...`
+- `GET /api/internal/business/changes?userId=...&after=...`
+- `POST /api/internal/business/ack`
 
-## YasReady. Books remains built in
+The legacy `/api/me/business-export` v1 route remains for backward compatibility.
 
-The future Books app contract is unchanged. Marketplace still owns the canonical paid ebook/audiobook entitlement, Library state, Saved/Recent, cross-device progress, guest-purchase claiming, sync cursors and content manifests.
+## Product boundary
+
+**Publishing | YasReady** owns production truth.  
+**Marketplace | YasReady** owns commercial truth.  
+**YasReady. Books** owns the reader experience against Marketplace entitlements.  
+**Business | YasReady** combines Marketplace truth with the rest of the company.
+
+Marketplace does not call tracked selling contribution full-company profit. Payroll, editing, design, software, tax, bank activity, overhead and non-Marketplace revenue remain Business concerns.
+
+## YasReady. Books remains intact
+
+The future Books app contract from v0.11 remains unchanged: digital purchase → entitlement → Library → cross-device reading/listening progress → future app sync.
 
 ## Quick preview
 
@@ -91,6 +102,7 @@ Double-click `SHOWCASE.command`.
 
 ```bash
 npm test
+npm run verify:business-bridge
 npm run verify:publishing
 npm run verify:publishing-live
 npm run verify:ingram-ops
@@ -105,4 +117,4 @@ npm run verify:style
 npm run verify:pages
 ```
 
-For an actual local/staging handshake smoke test, configure the test-only Publishing flags and run `PUBLISHING_LIVE_TEST.command`.
+Production migrations and service activation remain deliberate manual actions.

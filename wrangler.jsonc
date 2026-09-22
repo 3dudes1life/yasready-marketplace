@@ -42,7 +42,9 @@
     "BOOKS_APP_PUSH_ENABLED": "false",
     "BOOKS_APP_MIN_VERSION": "0.1.0",
     "BOOKS_APP_SCHEME": "yasreadybooks",
-    "INGRAM_COST_IMPORT_ENABLED": "false"
+    "INGRAM_COST_IMPORT_ENABLED": "false",
+    "BUSINESS_BRIDGE_ENABLED": "false",
+    "BUSINESS_BRIDGE_SCHEMA": "yasready.marketplace.business.v2"
   },
   "d1_databases": [
     {
