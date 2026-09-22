@@ -1,98 +1,91 @@
-# Marketplace | YasReady v0.7.0 — Build Report
+# Marketplace | YasReady v0.8.0 — Build Report
 
-## Result
+**Release:** Consumer Marketplace Closure  
+**Target:** `marketplace.yasready.com`  
+**Repository:** `3dudes1life/yasready-marketplace`
 
-**PASS — Real Catalog & Book Management package is ready for repository upload and demo.**
+## Release objective
 
-v0.7 turns the My Books area into an actual author catalog workspace while preserving the v0.6 YasReady visual system and the production/commercial ownership boundary established by the Publishing Handshake.
+v0.8 turns the public side of Marketplace into a reader product while preserving the author operating system completed in v0.6–v0.7. It also establishes the canonical reader-data contract intended to power the future **YasReady. Books** app.
 
-## Verification completed
+The core rule is unchanged: more capability should not create a second account or a second copy of the book. A central YasReady identity may act as an author and a reader; Marketplace owns commercial/reader truth while Publishing continues to own production truth.
 
-- `node --check src/main.js` — PASS
-- `node --check src/worker.mjs` — PASS
-- `node --check src/lib/catalog-management.mjs` — PASS
-- `node --test tests/foundation.test.mjs` — **58/58 PASS**
-- `node scripts/verify-catalog.mjs` — **16/16 PASS**
-- `node scripts/verify-ui-closure.mjs` — **20/20 PASS**
-- `node scripts/verify-yasready-style.mjs` — **16/16 PASS**
-- `node scripts/verify-pages.mjs` — **7/7 PASS**
-- `node scripts/verify-publishing.mjs` — **8/8 PASS**
-- fresh SQLite migration replay — **9/9 migrations PASS**
-- fresh schema after migrations — **55 application tables**
-- static HTTP smoke for `/`, `/src/main.js`, `/src/styles.css`, `/yasready-mark.png`, `/PREVIEW.html` — PASS
+## Consumer experience added
 
-## Catalog Management closure
+- Consumer-first discovery hero and search.
+- Genre shortcuts.
+- Digital-first ebook shelf.
+- Audiobook shelf when live audio editions exist.
+- Recently viewed shelf.
+- Saved books page and save/remove interactions.
+- Public author storefront view.
+- Series page with reading order.
+- Richer book detail view with format choices and digital-library messaging.
+- Mobile-first consumer styling separate from the author operating shell.
+- No-install static showcase updated to demonstrate the reader/library direction.
 
-### Working drafts
+## Reader platform foundation
 
-Autosave no longer writes directly into the live Marketplace listing. Each book gets one working `catalog_draft`, with a separate draft revision and the live listing revision it was based on.
+Migration `0010_consumer_marketplace.sql` adds:
 
-A stale browser tab receives a conflict instead of overwriting a newer draft. Applying a draft also fails if the live listing changed since that draft was based on it.
+- central YasReady `user_id` mapping for customers
+- customer profile/last-seen fields
+- book series metadata
+- `customer_saved_books`
+- `customer_recent_books`
+- `reader_progress`
+- `author_follows`
+- `reader_activity_events`
 
-### Shared author-profile concurrency
+The existing `customer_entitlements` table remains the durable ownership source of truth for purchased ebooks/audiobooks.
 
-The author storefront profile is shared across every book, so v0.7 gives it its own `profile_revision`. A draft created from Book One cannot silently overwrite a newer author bio/storefront profile saved from Book Two.
+Reader APIs now include:
 
-### Production truth vs commercial presentation
+- `GET /api/reader/session`
+- `GET /api/reader/library`
+- `GET /api/reader/saved`
+- `POST/DELETE /api/reader/saved/:bookId`
+- `GET /api/reader/recent`
+- `POST /api/reader/recent/:bookId`
+- `PATCH /api/reader/progress/:editionId`
+- `POST/DELETE /api/reader/follow/:authorId`
 
-Publishing remains authoritative for production data such as ISBN, format, artifacts, production status and provider IDs.
+Progress updates require an active entitlement and the submitted progress kind must match the digital edition format.
 
-Marketplace now stores reader-facing presentation as listing overrides:
+## YasReady. Books boundary
 
-- display title / subtitle
-- short and long description
-- optional cover override URL
-- category
-- excerpt
-- visibility
-- SEO title / description
-- planned launch date metadata
+v0.8 intentionally does **not** build a production EPUB reader, audiobook player, DRM system, protected file delivery, or offline downloads. It builds the account, entitlement, saved/recent and progress seams those clients will consume.
 
-Edition price and commercial status remain Marketplace-owned.
+This avoids creating a later app-specific library database that would diverge from Marketplace purchases.
 
-### Preview + validation
+## Existing systems preserved
 
-The editor includes a side-by-side reader preview. Draft validation checks required reader-facing data, live edition prices, physical ISBN requirements, production readiness and URL safety before an author can apply the draft.
+- v0.7 catalog autosave/preview/apply/history.
+- Marketplace-owned presentation vs Publishing-owned production truth.
+- v0.6 YasReady author operating shell and visual system.
+- v0.5 signed Publishing handoff and explicit author go-live gate.
+- v0.4 Ingram/provider bridge.
+- v0.3 commerce accounting, settlements, refunds, transfer and fulfillment records.
+- Marketing attribution and Business export contract.
+- Live-money/provider switches remain fail-closed.
 
-Validation runs are persisted separately for provenance.
+## Verification actually run
 
-### Audit history
+- **66/66** Node engine/regression tests passed.
+- **12/12** Consumer Marketplace checks passed.
+- **20/20** UI Closure regression checks passed.
+- **16/16** YasReady visual parity checks passed.
+- **7/7** GitHub Pages deployment checks passed.
+- **8/8** Publishing Handshake checks passed.
+- **16/16** Catalog Management checks passed.
+- JavaScript syntax checks passed for `src/main.js` and `src/worker.mjs`.
+- All **10/10** SQL migrations replayed successfully from an empty SQLite database.
+- Fresh database produced **60 application tables**.
+- Demo series metadata resolved in reading order after migration.
 
-Every applied catalog revision writes a `catalog_change_history` row with the changed field paths plus before/after snapshots. No-op applies return without manufacturing a new listing revision.
+## Production bundle status
 
-## APIs added
-
-- `GET /api/me/books/:bookId/editor`
-- `PATCH /api/me/books/:bookId/editor`
-- `GET /api/me/books/:bookId/preview`
-- `POST /api/me/books/:bookId/apply-draft`
-- `GET /api/me/books/:bookId/history`
-
-## UI added
-
-- My Books catalog summary
-- revision indicators
-- Edit Listing action
-- full-screen YasReady catalog editor
-- autosave state
-- reader-facing live preview
-- edition price + availability controls
-- author storefront profile controls
-- SEO/discovery controls
-- recent revision history
-- responsive mobile editor behavior
-
-`PREVIEW.html` was rebuilt around the v0.7 Catalog Editor so `SHOWCASE.command` demonstrates this release rather than the old v0.6 home dashboard.
-
-## Safety retained
-
-v0.7 does not loosen any production action gate. Live money, Stripe live mode, automatic refunds/transfers, Ingram submission/imports and Publishing transport remain fail-closed by default.
-
-The planned launch date in v0.7 is stored metadata only; no scheduler automatically publishes a book.
-
-## Production bundle limitation in this environment
-
-The Vite production bundle is **not claimed as verified** because this runtime does not contain the npm dependencies / Vite installation. Source syntax, engine behavior, catalog contracts, Pages deployment shape, Publishing contract, visual system and the complete database migration chain were verified independently above.
+The production Vite bundle was **not marked verified** in this runtime because `node_modules` is not installed here. No claim is made that `npm run build` was executed successfully in this environment.
 
 Run locally after installing dependencies:
 
@@ -100,3 +93,11 @@ Run locally after installing dependencies:
 npm install
 npm run verify
 ```
+
+## Safety state
+
+The package does not loosen the existing safety gates. Live checkout, Stripe live mode, automatic refunds/payouts/transfers, Ingram submission/imports and Publishing transport remain disabled unless explicitly configured.
+
+## Recommended next build
+
+v0.9 should be **Marketing Studio**: turn the attribution plumbing already present into a polished author growth workspace with campaign assets, tracked links/QRs, website embeds, social/email launch kits and actionable campaign performance.

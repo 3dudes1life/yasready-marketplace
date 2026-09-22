@@ -1,93 +1,61 @@
-# Marketplace | YasReady v0.7.0
+# Marketplace | YasReady v0.8.0
 
-**Real Catalog & Book Management**
+**Consumer Marketplace Closure**
 
-Marketplace remains a standalone YasReady product/repository for `marketplace.yasready.com`. v0.7 turns **My Books** into a real author operating workspace while preserving the one-way Publishing boundary established in v0.5 and the YasReady shell closed in v0.6.
+Marketplace remains the standalone commerce/discovery product at `marketplace.yasready.com`. v0.8 keeps the v0.7 author catalog and all prior commerce/provider architecture, then adds the reader layer that can later power **YasReady. Books** without creating a second customer system.
 
-## What changed in v0.7
+## What changed in v0.8
 
-Authors can now open a full catalog editor for a book and manage the commercial layer without editing Publishing production truth.
+The public storefront is now organized for readers, not authors. It includes richer discovery/search, genre shortcuts, digital-first and audiobook shelves, recently viewed titles, saved books, public author storefronts, series reading-order pages, richer title details, and a more consumer-focused mobile layout.
 
-### Catalog editor
+The same YasReady identity can now be both an author and a reader. Marketplace maps that central `userId` to a `customer` record instead of creating another password/account system.
 
-- reader-facing title and subtitle overrides
-- short and full descriptions
-- optional storefront cover override URL
-- category and excerpt / preview copy
-- public, direct-link or private visibility
-- per-edition price
-- per-edition draft / live / paused availability
-- author storefront display name, tagline, bio and website
-- SEO title and description
-- planned launch date metadata
-- live preview beside the editor
+### Reader data foundation
 
-The preview updates while the author edits. ISBN, format, production status and fulfillment provider are intentionally displayed as production-owned/locked information.
+v0.8 adds persistent records for:
 
-### Autosave without changing the live store
+- saved books
+- recently viewed books
+- ebook/audiobook entitlement library
+- reading/listening progress
+- author follows
+- reader activity events
+- series name/order metadata
 
-v0.7 does **not** autosave directly into the live listing. Each book has one working `catalog_draft`.
+`customer_entitlements`, introduced earlier, remains the purchase-ownership source of truth. v0.8 adds progress and library APIs around it rather than creating a duplicate “app purchase” model.
 
-- edits debounce into an autosave
-- draft revisions protect against stale browser tabs
-- the live listing has its own revision number
-- the author previews the draft before applying it
-- `Apply changes` performs validation and atomically updates Marketplace-owned fields
-- a stale draft cannot overwrite a newer live revision
-- a no-op apply does not create a fake revision
+### YasReady. Books bridge
 
-### Change history and validation provenance
+The future **YasReady. Books** app is intentionally not a separate content database. It can consume Marketplace reader APIs for ownership and progress:
 
-Every applied revision records which commercial fields changed. Validation results are also stored separately, so Marketplace can explain why a draft was or was not ready instead of recomputing history later.
+- `GET /api/reader/library`
+- `GET /api/reader/saved`
+- `POST/DELETE /api/reader/saved/:bookId`
+- `GET /api/reader/recent`
+- `POST /api/reader/recent/:bookId`
+- `PATCH /api/reader/progress/:editionId`
+- `POST/DELETE /api/reader/follow/:authorId`
 
-### Publishing stays protected
+The reader/player UI itself is not production-built in v0.8; the library buttons are intentionally a preview of the next consumer layer.
 
-Publishing still owns:
+## Existing systems preserved
 
-- ISBN
-- edition format
-- production artifact reference/hash
-- production status
-- provider identifiers
-- original source metadata and revision
+v0.8 retains:
 
-Marketplace stores reader-facing presentation as overrides on the listing. A Publishing sync can continue updating production truth without silently replacing Marketplace price or commercial presentation choices.
+- v0.7 catalog drafts, autosave, preview, validation and audit history
+- v0.6 YasReady author operating shell
+- v0.5 signed Publishing handshake and explicit author launch gate
+- v0.4 Ingram bridge/provider operations
+- v0.3 Stripe/settlement/refund/payout accounting model
+- marketing attribution and Business export contracts
 
-## API added in v0.7
+Publishing remains a separate repo and is not modified by this package.
 
-- `GET /api/me/books/:bookId/editor`
-- `PATCH /api/me/books/:bookId/editor`
-- `GET /api/me/books/:bookId/preview`
-- `POST /api/me/books/:bookId/apply-draft`
-- `GET /api/me/books/:bookId/history`
+## Safety
 
-See `docs/CATALOG-MANAGEMENT.md` for the ownership and concurrency contract.
+Live checkout, live Stripe mode, automatic refunds/transfers, Ingram submission/import actions and Publishing transport remain fail-closed unless explicitly configured. v0.8 adds consumer data APIs; it does not loosen any money/provider gates.
 
-## Database
-
-New migration: `0009_catalog_management.sql`
-
-It adds Marketplace presentation override fields plus:
-
-- `catalog_drafts`
-- `catalog_change_history`
-- `catalog_validation_runs`
-
-Fresh migration replay now produces **55 application tables**.
-
-## YasReady product boundaries retained
-
-**Publishing | YasReady** → production truth and finished book assets  
-**Marketplace | YasReady** → storefront, catalog, commerce, promotion, fulfillment and commercial analytics  
-**Business | YasReady** → future company-wide intelligence consumer
-
-The same central YasReady user identity maps into Marketplace; there is still no second author password/account.
-
-## Safety defaults retained
-
-Live money, Stripe live mode, automatic refunds/transfers, Ingram submission/import paths and Publishing transport remain fail-closed unless explicitly configured. v0.7 does not loosen any provider safety gate.
-
-## Quick showcase
+## Quick preview
 
 Double-click:
 
@@ -95,24 +63,18 @@ Double-click:
 SHOWCASE.command
 ```
 
-This opens the no-install v0.7 catalog-management preview.
+The no-install preview demonstrates the consumer storefront, digital shelves and YasReady library concept.
 
 ## Verification
 
 ```bash
 npm test
-npm run verify:catalog
-npm run verify:ui
-npm run verify:style
-npm run verify:pages
-npm run verify:publishing
+./CONSUMER_VERIFY.command
+./UI_CLOSURE_VERIFY.command
+./YASREADY_STYLE_VERIFY.command
+./PAGES_VERIFY.command
+./PUBLISHING_HANDSHAKE_VERIFY.command
+./CATALOG_VERIFY.command
 ```
 
-Full local verification after installing dependencies:
-
-```bash
-npm install
-npm run verify
-```
-
-The repository remains configured for `3dudes1life/yasready-marketplace` and the eventual production domain `marketplace.yasready.com`.
+See `BUILD_REPORT.md` for the exact verified state of this package.

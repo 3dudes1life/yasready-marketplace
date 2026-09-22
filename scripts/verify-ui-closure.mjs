@@ -8,7 +8,7 @@ const html=read('index.html');
 const pkg=JSON.parse(read('package.json'));
 
 const checks=[
-  ['package version is 0.7.0',()=>assert.equal(pkg.version,'0.7.0')],
+  ['package version is 0.8.0',()=>assert.equal(pkg.version,'0.8.0')],
   ['public storefront chrome exists',()=>assert.match(main,/publicChrome/)],
   ['creator left rail exists',()=>assert.match(main,/yrSidebar/)],
   ['creator utility bar exists',()=>assert.match(main,/yrTopbar/)],
@@ -27,11 +27,11 @@ const checks=[
   ['Ready Lime remains status signal',()=>assert.match(css,/--yr-brand:#C6FF00/)],
   ['theme preference prepaints before app',()=>assert.ok(html.indexOf('yasready-theme')<html.indexOf('<div id="app">'))],
   ['GitHub Pages relative bootstrap retained',()=>assert.match(html,/src="\.\/src\/main\.js"/)],
-  ['release label appears in UI',()=>assert.match(main,/v0\.7\.0 · Catalog Management/)]
+  ['release label appears in UI',()=>assert.match(main,/v0\.8\.0 · Consumer Marketplace Closure/)]
 ];
 
 let passed=0;
 for(const [name,run] of checks){
   try{run();passed++;console.log(`PASS: ${name}`)}catch(err){console.error(`FAIL: ${name}`);throw err}
 }
-console.log(`PASS: ${passed}/${checks.length} v0.7 UI Closure regression checks`);
+console.log(`PASS: ${passed}/${checks.length} v0.8 UI Closure regression checks`);

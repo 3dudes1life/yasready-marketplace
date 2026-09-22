@@ -11,12 +11,14 @@ import {recordOrderStatus,openCommerceException,ensureReceiptToken,materializeSe
 import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mjs';
 import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePublishingDiff,readinessForSale,verifyPublishingSignature,slugify} from './lib/publishing-handoff.mjs';
 import {normalizeCatalogDraft,validateCatalogDraft,catalogPreview,changedCatalogFields} from './lib/catalog-management.mjs';
+import {normalizeReaderProgress} from './lib/consumer.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
 const uuid=()=>crypto.randomUUID();
 const now=()=>new Date().toISOString();
 const clampQty=n=>Math.max(1,Math.min(25,Number(n)||1));
+const READER_ROUTES=['/api/reader/library','/api/reader/saved','/api/reader/recent','/api/reader/progress/:editionId','/api/reader/follow/:authorId'];
 
 function requireAdmin(request,env){
   const secret=request.headers.get('x-yasready-admin-secret')||request.headers.get('authorization')?.replace(/^Bearer\s+/i,'');
@@ -72,7 +74,7 @@ function catalogFromRows(rows){
   const books=new Map();
   for(const r of rows){
     if(!books.has(r.book_id)) books.set(r.book_id,{
-      id:r.book_id,slug:r.slug,title:r.display_title||r.title,subtitle:r.display_subtitle??r.subtitle,description:r.description_override??r.description,longDescription:r.long_description_override??r.long_description,coverUrl:r.cover_override_url??r.cover_url,category:r.category_override??r.primary_category,excerpt:r.excerpt||null,
+      id:r.book_id,slug:r.slug,title:r.display_title||r.title,subtitle:r.display_subtitle??r.subtitle,description:r.description_override??r.description,longDescription:r.long_description_override??r.long_description,coverUrl:r.cover_override_url??r.cover_url,category:r.category_override??r.primary_category,excerpt:r.excerpt||null,series:r.series_name||null,seriesNumber:r.series_number==null?null:Number(r.series_number),
       author:{id:r.author_id,name:r.author_name,handle:r.author_handle,avatarUrl:r.author_avatar_url,bio:r.author_bio||null,websiteUrl:r.author_website_url||null,storefrontTagline:r.storefront_tagline||null},
       listing:{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at,scheduledLiveAt:r.scheduled_live_at||null,revision:Number(r.editor_revision||0)},editions:[]
     });
@@ -81,9 +83,40 @@ function catalogFromRows(rows){
   return [...books.values()];
 }
 
+
+async function ensureCustomer(env,identity){
+  let customer=await env.DB.prepare(`SELECT * FROM customers WHERE user_id=? LIMIT 1`).bind(identity.userId).first();
+  if(!customer){
+    const id=uuid();
+    await env.DB.prepare(`INSERT INTO customers (id,user_id,email,display_name,avatar_url,last_seen_at,created_at) VALUES (?,?,?,?,?,?,?)`).bind(id,identity.userId,identity.email||null,identity.name||'YasReady Reader',identity.avatarUrl||null,now(),now()).run();
+    customer=await env.DB.prepare(`SELECT * FROM customers WHERE id=?`).bind(id).first();
+  }else{
+    await env.DB.prepare(`UPDATE customers SET email=COALESCE(?,email),display_name=COALESCE(?,display_name),avatar_url=COALESCE(?,avatar_url),last_seen_at=? WHERE id=?`).bind(identity.email||null,identity.name||null,identity.avatarUrl||null,now(),customer.id).run();
+    customer=await env.DB.prepare(`SELECT * FROM customers WHERE id=?`).bind(customer.id).first();
+  }
+  return customer;
+}
+
+async function readerLibrary(env,customerId){
+  const rows=await all(env.DB.prepare(`SELECT ce.id entitlement_id,ce.status entitlement_status,ce.granted_at,e.id edition_id,e.format,e.price_minor,b.id book_id,b.slug,b.title,b.subtitle,b.cover_url,b.series_name,b.series_number,a.display_name author_name,a.handle author_handle,rp.percent,rp.progress_kind,rp.seconds_position,rp.locator_json,rp.completed_at,rp.updated_at progress_updated_at FROM customer_entitlements ce JOIN editions e ON e.id=ce.edition_id JOIN books b ON b.id=e.book_id JOIN authors a ON a.id=b.author_id LEFT JOIN reader_progress rp ON rp.customer_id=ce.customer_id AND rp.edition_id=ce.edition_id WHERE ce.customer_id=? AND ce.status='active' ORDER BY COALESCE(rp.updated_at,ce.granted_at) DESC`).bind(customerId));
+  return rows.map(r=>({...r,percent:Number(r.percent||0),locator:safeAddress(r.locator_json)}));
+}
+
+async function readerSaved(env,customerId){
+  const ids=await all(env.DB.prepare(`SELECT book_id,created_at FROM customer_saved_books WHERE customer_id=? ORDER BY created_at DESC`).bind(customerId));
+  if(!ids.length)return [];
+  const books=await getCatalog(env);const byId=new Map(books.map(b=>[b.id,b]));return ids.map(x=>({...byId.get(x.book_id),savedAt:x.created_at})).filter(x=>x.id);
+}
+
+async function readerRecent(env,customerId){
+  const ids=await all(env.DB.prepare(`SELECT book_id,last_viewed_at,view_count FROM customer_recent_books WHERE customer_id=? ORDER BY last_viewed_at DESC LIMIT 20`).bind(customerId));
+  if(!ids.length)return [];
+  const books=await getCatalog(env);const byId=new Map(books.map(b=>[b.id,b]));return ids.map(x=>({...byId.get(x.book_id),lastViewedAt:x.last_viewed_at,viewCount:Number(x.view_count||0)})).filter(x=>x.id);
+}
+
 async function getCatalog(env,slug=null){
   const where=slug?`AND b.slug=?`:'';
-  const sql=`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.long_description,b.cover_url,b.primary_category,
+  const sql=`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.long_description,b.cover_url,b.primary_category,b.series_name,b.series_number,
     a.id author_id,a.display_name author_name,a.handle author_handle,a.avatar_url author_avatar_url,a.bio author_bio,a.website_url author_website_url,a.storefront_tagline,
     l.id listing_id,l.status listing_status,l.visibility,l.published_at,l.scheduled_live_at,l.editor_revision,l.display_title,l.display_subtitle,l.description_override,l.long_description_override,l.cover_override_url,l.category_override,l.excerpt,
     e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor,e.publishing_source_edition_id,e.production_status,e.artifact_ref,e.artifact_hash,e.production_synced_at
@@ -314,12 +347,18 @@ async function authorBookReadiness(env,author,bookId){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.7.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.8.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
   if(path.startsWith('/api/catalog/')&&request.method==='GET'){
     const slug=decodeURIComponent(path.slice('/api/catalog/'.length)); const books=await getCatalog(env,slug); return books[0]?json({ok:true,book:books[0]}):json({ok:false,error:'book_not_found'},404);
+  }
+  if(path.startsWith('/api/authors/')&&request.method==='GET'){
+    const handle=decodeURIComponent(path.slice('/api/authors/'.length));const books=(await getCatalog(env)).filter(b=>b.author?.handle===handle);if(!books.length)return json({ok:false,error:'author_not_found'},404);return json({ok:true,author:books[0].author,books});
+  }
+  if(path.startsWith('/api/series/')&&request.method==='GET'){
+    const series=decodeURIComponent(path.slice('/api/series/'.length)).replaceAll('-',' ').toLowerCase();const books=(await getCatalog(env)).filter(b=>String(b.series||'').toLowerCase()===series).sort((a,b)=>(a.seriesNumber||999)-(b.seriesNumber||999));if(!books.length)return json({ok:false,error:'series_not_found'},404);return json({ok:true,series:books[0].series,books});
   }
 
   if(path.startsWith('/api/receipt/')&&request.method==='GET'){
@@ -337,6 +376,38 @@ async function api(request,env){
   if(path==='/api/session'&&request.method==='GET'){
     const auth=await requireIdentity(request,env); if(auth.response) return auth.response; const author=await ensureAuthor(env,auth.identity);
     return json({ok:true,identity:publicIdentity(auth.identity),author:{id:author.id,displayName:author.display_name,email:author.email,handle:author.handle,avatarUrl:author.avatar_url,bio:author.bio,websiteUrl:author.website_url,storefrontTagline:author.storefront_tagline,stripeOnboardingStatus:author.stripe_onboarding_status,marketplaceStatus:author.marketplace_status},sharedAccount:true});
+  }
+
+  if(path.startsWith('/api/reader/')){
+    const auth=await requireIdentity(request,env); if(auth.response) return auth.response; const customer=await ensureCustomer(env,auth.identity);
+    if(path==='/api/reader/session'&&request.method==='GET') return json({ok:true,identity:publicIdentity(auth.identity),customer:{id:customer.id,userId:customer.user_id,displayName:customer.display_name,email:customer.email}});
+    if(path==='/api/reader/library'&&request.method==='GET') return json({ok:true,items:await readerLibrary(env,customer.id)});
+    if(path==='/api/reader/saved'&&request.method==='GET') return json({ok:true,books:await readerSaved(env,customer.id)});
+    if(path.match(/^\/api\/reader\/saved\/[^/]+$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]); const book=(await getCatalog(env)).find(b=>b.id===bookId); if(!book) return json({ok:false,error:'book_not_found'},404);
+      await env.DB.prepare(`INSERT OR IGNORE INTO customer_saved_books (customer_id,book_id,created_at) VALUES (?,?,?)`).bind(customer.id,bookId,now()).run(); return json({ok:true,saved:true,bookId});
+    }
+    if(path.match(/^\/api\/reader\/saved\/[^/]+$/)&&request.method==='DELETE'){
+      const bookId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM customer_saved_books WHERE customer_id=? AND book_id=?`).bind(customer.id,bookId).run(); return json({ok:true,saved:false,bookId});
+    }
+    if(path==='/api/reader/recent'&&request.method==='GET') return json({ok:true,books:await readerRecent(env,customer.id)});
+    if(path.match(/^\/api\/reader\/recent\/[^/]+$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]); const book=(await getCatalog(env)).find(b=>b.id===bookId); if(!book) return json({ok:false,error:'book_not_found'},404);
+      await env.DB.prepare(`INSERT INTO customer_recent_books (customer_id,book_id,last_viewed_at,view_count) VALUES (?,?,?,1) ON CONFLICT(customer_id,book_id) DO UPDATE SET last_viewed_at=excluded.last_viewed_at,view_count=customer_recent_books.view_count+1`).bind(customer.id,bookId,now()).run(); return json({ok:true,bookId});
+    }
+    if(path.match(/^\/api\/reader\/progress\/[^/]+$/)&&request.method==='PATCH'){
+      const editionId=decodeURIComponent(path.split('/')[4]); const entitlement=await env.DB.prepare(`SELECT ce.id,e.format FROM customer_entitlements ce JOIN editions e ON e.id=ce.edition_id WHERE ce.customer_id=? AND ce.edition_id=? AND ce.status='active'`).bind(customer.id,editionId).first(); if(!entitlement) return json({ok:false,error:'entitlement_required'},403);
+      const progress=normalizeReaderProgress(await safeJson(request)||{}); if(progress.progressKind!==String(entitlement.format).toLowerCase()) return json({ok:false,error:'progress_kind_mismatch'},400);
+      await env.DB.prepare(`INSERT INTO reader_progress (customer_id,edition_id,progress_kind,percent,locator_json,seconds_position,completed_at,updated_at) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(customer_id,edition_id) DO UPDATE SET progress_kind=excluded.progress_kind,percent=excluded.percent,locator_json=excluded.locator_json,seconds_position=excluded.seconds_position,completed_at=excluded.completed_at,updated_at=excluded.updated_at`).bind(customer.id,editionId,progress.progressKind,progress.percent,progress.locator?JSON.stringify(progress.locator):null,progress.secondsPosition,progress.completed?now():null,now()).run();
+      return json({ok:true,editionId,...progress});
+    }
+    if(path.match(/^\/api\/reader\/follow\/[^/]+$/)&&request.method==='POST'){
+      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`INSERT OR IGNORE INTO author_follows (customer_id,author_id,created_at) VALUES (?,?,?)`).bind(customer.id,authorId,now()).run(); return json({ok:true,following:true,authorId});
+    }
+    if(path.match(/^\/api\/reader\/follow\/[^/]+$/)&&request.method==='DELETE'){
+      const authorId=decodeURIComponent(path.split('/')[4]); await env.DB.prepare(`DELETE FROM author_follows WHERE customer_id=? AND author_id=?`).bind(customer.id,authorId).run(); return json({ok:true,following:false,authorId});
+    }
+    return json({ok:false,error:'reader_route_not_found'},404);
   }
 
   if(path.startsWith('/api/me/')){
@@ -637,6 +708,6 @@ export default {
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.7.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.8.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

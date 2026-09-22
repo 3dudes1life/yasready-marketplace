@@ -1,0 +1,18 @@
+import fs from 'node:fs';
+const read=p=>fs.readFileSync(new URL(p,import.meta.url),'utf8');
+const checks=[];const ok=(name,pass)=>{checks.push([name,!!pass]);if(!pass)process.exitCode=1};
+const main=read('../src/main.js'),css=read('../src/styles.css'),worker=read('../src/worker.mjs'),sql=read('../migrations/0010_consumer_marketplace.sql');
+ok('consumer public views exist',/libraryView/.test(main)&&/savedView/.test(main)&&/authorPageView/.test(main)&&/seriesPageView/.test(main));
+ok('YasReady. Books bridge is visible',/YasReady\. Books/.test(main));
+ok('save and recent interactions exist',/data-save/.test(main)&&/recordRecent/.test(main));
+ok('reader library and progress APIs exist',/\/api\/reader\/library/.test(worker)&&/\/api\/reader\/progress\//.test(worker));
+ok('reader identity reuses YasReady user id',/customers ADD COLUMN user_id|ALTER TABLE customers ADD COLUMN user_id/.test(sql));
+ok('saved books persisted',/customer_saved_books/.test(sql));
+ok('recent books persisted',/customer_recent_books/.test(sql));
+ok('reader progress persisted',/reader_progress/.test(sql));
+ok('author follows persisted',/author_follows/.test(sql));
+ok('consumer hero style exists',/\.consumerHero/.test(css));
+ok('library style exists',/\.libraryGrid/.test(css));
+ok('mobile consumer closure exists',/@media\(max-width:700px\)/.test(css));
+for(const [n,p] of checks)console.log(`${p?'PASS':'FAIL'}: ${n}`);
+console.log(`\n${checks.filter(x=>x[1]).length}/${checks.length} consumer checks passed`);

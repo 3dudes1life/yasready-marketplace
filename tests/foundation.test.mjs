@@ -59,7 +59,7 @@ test('v0.5 uses YasReady green for operating actions instead of legacy purple-fi
 test('v0.5 shares the YasReady appearance preference contract',()=>{const main=read('../src/main.js'),html=read('../index.html');assert.match(main,/yasready-theme/);assert.match(main,/yr-shared-theme-toggle/);assert.match(html,/localStorage\.getItem\('yasready-theme'\)/)});
 test('v0.5 operating shell keeps compact YasReady density',()=>{const css=read('../src/styles.css');assert.match(css,/\.nav\{height:64px!important/);assert.match(css,/\.btn\{min-height:40px!important/);assert.match(css,/\.panel\{border-radius:15px!important/)});
 
-test('v0.6 separates the public storefront from the author operating shell',()=>{const main=read('../src/main.js');assert.match(main,/publicChrome/);assert.match(main,/yrSidebar/);assert.match(main,/yrTopbar/);assert.match(main,/yrMobileNav/);assert.match(main,/state\.view==='store'/)});
+test('v0.6 separates the public storefront from the author operating shell',()=>{const main=read('../src/main.js');assert.match(main,/publicChrome/);assert.match(main,/yrSidebar/);assert.match(main,/yrTopbar/);assert.match(main,/yrMobileNav/);assert.ok(/state\.view==='store'|isPublicView/.test(main))});
 test('v0.6 author shell groups Marketplace work instead of crowding one top nav',()=>{const main=read('../src/main.js');for(const label of ['Workspace','Grow','Operations'])assert.match(main,new RegExp(label));for(const view of ['dashboard','books','launch','sales','marketing','commerce','fulfillment','integrations'])assert.match(main,new RegExp(`\\['${view}'`))});
 test('v0.6 uses the exact shared YasReady mark asset in the shell',()=>{const main=read('../src/main.js');assert.match(main,/yasready-mark\.png/);assert.ok(fs.existsSync(new URL('../yasready-mark.png',import.meta.url)));assert.ok(fs.existsSync(new URL('../public/yasready-mark.png',import.meta.url)))});
 test('v0.6 keeps author content clear of the fixed navigation rails',()=>{const css=read('../src/styles.css');assert.match(css,/--yr-sidebar:224px/);assert.match(css,/\.creator-ui \.creatorView\{margin-left:var\(--yr-sidebar\)/);assert.match(css,/\.yrTopbar\{position:fixed;left:var\(--yr-sidebar\)/)});
@@ -119,3 +119,14 @@ test('v0.7 blocks unsafe catalog cover URLs before apply',()=>{
 });
 
 test('v0.7 no-op draft apply does not manufacture a listing revision',()=>{assert.match(read('../src/worker.mjs'),/noOp:true/)});
+
+import {normalizeReaderProgress,readerCanOpenEdition,groupSeries,publicAuthorFromBooks} from '../src/lib/consumer.mjs';
+
+test('v0.8 reader progress clamps and completes cleanly',()=>{const p=normalizeReaderProgress({progressKind:'ebook',percent:101,locator:{chapter:8}});assert.equal(p.percent,100);assert.equal(p.completed,true);assert.deepEqual(p.locator,{chapter:8})});
+test('v0.8 digital library only opens active ebook/audiobook entitlements',()=>{assert.equal(readerCanOpenEdition({format:'ebook',status:'active'}),true);assert.equal(readerCanOpenEdition({format:'paperback',status:'active'}),false);assert.equal(readerCanOpenEdition({format:'audiobook',status:'revoked'}),false)});
+test('v0.8 series helper preserves reading order',()=>{const g=groupSeries([{id:'2',series:'S',seriesNumber:2},{id:'1',series:'S',seriesNumber:1}]);assert.deepEqual(g[0].books.map(x=>x.id),['1','2'])});
+test('v0.8 author storefront derives from public catalog without a second profile system',()=>{const a=publicAuthorFromBooks([{id:'b',author:'A',authorId:'a',handle:'a',author:{id:'a',handle:'a',name:'A',bio:'Bio'}}],'a');assert.equal(a.name,'A');assert.equal(a.books.length,1)});
+test('v0.8 migration adds customer identity saved recent progress and follows',()=>{const sql=read('../migrations/0010_consumer_marketplace.sql');for(const token of ['customer_saved_books','customer_recent_books','reader_progress','author_follows','user_id'])assert.match(sql,new RegExp(token))});
+test('v0.8 exposes reader library saved recent progress and follow APIs',()=>{const w=read('../src/worker.mjs');for(const token of ['/api/reader/library','/api/reader/saved','/api/reader/recent','/api/reader/progress','/api/reader/follow'])assert.match(w,new RegExp(token.replaceAll('/','\\/')))});
+test('v0.8 consumer UI includes discovery library saved author series and Books bridge',()=>{const m=read('../src/main.js');for(const token of ['consumerHero','libraryView','savedView','authorPageView','seriesPageView','YasReady. Books','Recently viewed'])assert.match(m,new RegExp(token.replace('.','\\.')))});
+test('v0.8 consumer data remains one YasReady identity',()=>{const w=read('../src/worker.mjs');assert.match(w,/ensureCustomer\(env,auth\.identity\)/);assert.match(w,/user_id=\?/)});
