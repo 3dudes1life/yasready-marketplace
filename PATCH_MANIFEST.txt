@@ -1,41 +1,41 @@
-YasReady Marketplace v0.12.0 patch
-Baseline required: v0.11.0
-Changed/new repo files: 32
-Deleted repo files: 0
+Marketplace | YasReady v0.13.0 PATCH FROM v0.12.0
 
-FILES IN PATCH:
-.env.example
-BUILD_REPORT.md
-CATALOG_VERIFY.command
-CHANGELOG.md
-COMMERCE_PRO_VERIFY.command
-CONSUMER_VERIFY.command
-INGRAM_OPERATIONS_VERIFY.command
-MARKETING_VERIFY.command
-PREVIEW.html
-README.md
-SHOWCASE.command
-UI_CLOSURE_VERIFY.command
-YASREADY_STYLE_VERIFY.command
-docs/INGRAM-BRIDGE.md
-docs/INGRAM-OPERATIONS-CLOSURE.md
-migrations/0014_ingram_operations.sql
-package.json
-scripts/verify-analytics-brain.mjs
-scripts/verify-books-app.mjs
-scripts/verify-build.mjs
-scripts/verify-catalog.mjs
-scripts/verify-ingram-operations.mjs
-scripts/verify-marketing-studio.mjs
-scripts/verify-ui-closure.mjs
-src/lib/ingram-operations.mjs
-src/lib/ingram.mjs
-src/lib/providers.mjs
-src/main.js
-src/styles.css
-src/worker.mjs
-tests/ingram-operations.test.mjs
-wrangler.jsonc
+Patch files: 32
 
-FILES TO DELETE:
-(none)
+CHANGED  .env.example
+CHANGED  BUILD_REPORT.md
+CHANGED  CATALOG_VERIFY.command
+CHANGED  CHANGELOG.md
+CHANGED  COMMERCE_PRO_VERIFY.command
+CHANGED  CONSUMER_VERIFY.command
+CHANGED  INGRAM_OPERATIONS_VERIFY.command
+CHANGED  MARKETING_VERIFY.command
+CHANGED  PREVIEW.html
+NEW      PUBLISHING_LIVE_TEST.command
+NEW      PUBLISHING_LIVE_VERIFY.command
+CHANGED  README.md
+CHANGED  SHOWCASE.command
+CHANGED  UI_CLOSURE_VERIFY.command
+CHANGED  YASREADY_STYLE_VERIFY.command
+NEW      docs/PUBLISHING-HANDSHAKE-LIVE-TEST.md
+NEW      examples/publishing-handoff-update.example.json
+NEW      migrations/0015_publishing_live_test.sql
+CHANGED  package.json
+NEW      scripts/publishing-live-test.mjs
+CHANGED  scripts/verify-analytics-brain.mjs
+CHANGED  scripts/verify-books-app.mjs
+CHANGED  scripts/verify-build.mjs
+CHANGED  scripts/verify-catalog.mjs
+CHANGED  scripts/verify-ingram-operations.mjs
+CHANGED  scripts/verify-marketing-studio.mjs
+NEW      scripts/verify-publishing-live.mjs
+CHANGED  scripts/verify-ui-closure.mjs
+CHANGED  src/main.js
+CHANGED  src/worker.mjs
+NEW      tests/publishing-live.test.mjs
+CHANGED  wrangler.jsonc
+
+Baseline required: v0.12.0
+Result after apply: v0.13.0
+No files are deleted by this patch.
+Migration added: migrations/0015_publishing_live_test.sql

@@ -6,4 +6,4 @@ const worker=fs.readFileSync('src/worker.mjs','utf8');
 for(const route of ['/api/session','/api/me/stats','/api/me/campaigns','/api/me/business-export','/api/me/analytics-brain','/api/me/stripe/onboard','/api/webhooks/stripe','/api/me/orders','/api/me/ledger','/api/me/payouts','/api/me/fulfillment','/api/admin/refunds','/api/admin/transfers/create']) if(!worker.includes(route)) throw new Error(`Missing engine route ${route}`);
 const cfg=fs.readFileSync('wrangler.jsonc','utf8');
 if(!cfg.includes('"CHECKOUT_ENABLED": "false"')) throw new Error('Checkout must fail closed');
-console.log('✅ Marketplace | YasReady v0.11.0 verified: Commerce + Books App Bridge + prior Marketplace layers are present in the production bundle.');
+console.log('✅ Marketplace | YasReady v0.13.0 verified: Commerce + Books App Bridge + prior Marketplace layers are present in the production bundle.');

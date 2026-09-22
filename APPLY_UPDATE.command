@@ -1,45 +1,57 @@
 #!/bin/bash
 set -euo pipefail
-
 PATCH_DIR="$(cd "$(dirname "$0")" && pwd)"
-PAYLOAD="$PATCH_DIR/payload"
 TARGET="${1:-}"
 
 if [[ -z "$TARGET" ]]; then
   for candidate in \
+    "$HOME/Documents/GitHub/yasready-marketplace" \
+    "$HOME/GitHub/yasready-marketplace" \
     "$HOME/Downloads/yasready-marketplace" \
-    "$HOME/Desktop/yasready-marketplace" \
-    "$HOME/Documents/yasready-marketplace"; do
-    if [[ -f "$candidate/package.json" ]]; then
-      TARGET="$candidate"
-      break
-    fi
+    "$PATCH_DIR/../yasready-marketplace"; do
+    if [[ -f "$candidate/package.json" ]]; then TARGET="$candidate"; break; fi
   done
 fi
 
 if [[ -z "$TARGET" || ! -f "$TARGET/package.json" ]]; then
-  echo "Could not find the yasready-marketplace repo."
-  echo "Run this command from Terminal with the repo path, for example:"
-  echo "  bash \"$0\" \"$HOME/Downloads/yasready-marketplace\""
-  exit 1
+  echo "Could not find your yasready-marketplace repo."
+  echo "Run again with the repo path, for example:"
+  echo "  ./APPLY_UPDATE.command \"$HOME/Documents/GitHub/yasready-marketplace\""
+  exit 2
 fi
 
-CURRENT_VERSION="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version||""))' "$TARGET/package.json" 2>/dev/null || true)"
-if [[ "$CURRENT_VERSION" != "0.11.0" ]]; then
-  echo "REFUSING TO APPLY: expected Marketplace v0.11.0, found v${CURRENT_VERSION:-unknown}."
-  echo "This patch is specifically v0.11.0 -> v0.12.0."
-  exit 1
+CURRENT_VERSION=$(python3 - <<PY
+import json
+print(json.load(open(r'''$TARGET/package.json'''))['version'])
+PY
+)
+if [[ "$CURRENT_VERSION" != "0.12.0" ]]; then
+  echo "Expected v0.12.0 baseline, found v$CURRENT_VERSION in: $TARGET"
+  echo "Patch stopped before changing anything."
+  exit 3
 fi
 
-echo "Applying YasReady Marketplace v0.12.0 patch..."
-rsync -a "$PAYLOAD/" "$TARGET/"
+echo "Applying Marketplace | YasReady v0.13.0 patch"
+echo "Baseline: v$CURRENT_VERSION"
+echo "Target:   $TARGET"
 
-NEW_VERSION="$(node -e 'const p=require(process.argv[1]); process.stdout.write(String(p.version||""))' "$TARGET/package.json" 2>/dev/null || true)"
-if [[ "$NEW_VERSION" != "0.12.0" ]]; then
-  echo "Patch copy completed, but version verification failed (found v${NEW_VERSION:-unknown})."
-  exit 1
-fi
+cd "$PATCH_DIR"
+while IFS= read -r rel; do
+  [[ -z "$rel" ]] && continue
+  mkdir -p "$TARGET/$(dirname "$rel")"
+  cp -p "$PATCH_DIR/$rel" "$TARGET/$rel"
+done < <(awk '/^(NEW|CHANGED)/{sub(/^(NEW|CHANGED)[[:space:]]+/,""); print}' PATCH_MANIFEST.txt)
 
-echo "PASS: Marketplace updated to v0.12.0"
-echo "Changed/new repo files applied: $(find "$PAYLOAD" -type f | wc -l | tr -d ' ')"
-echo "No repo files are deleted by this patch."
+echo "Files applied. Running safe verification..."
+cd "$TARGET"
+node --check src/worker.mjs
+node --check src/main.js
+npm test
+npm run verify:publishing
+npm run verify:publishing-live
+
+echo ""
+echo "PASS: Marketplace | YasReady is now v0.13.0"
+echo "New D1 migration is NOT applied automatically. When ready, run your normal migration command:"
+echo "  npm run db:migrate:local    # local"
+echo "  npm run db:migrate:remote   # remote, only when you intentionally want it"

@@ -1,30 +1,33 @@
 # Changelog
 
-## 0.11.0 — Stripe Test Commerce Closure + YasReady. Books App Bridge
+## 0.13.0 — Publishing Handshake Live Test
 
-### Commerce
-- Added explicit Stripe test-readiness model and eight-scenario certification runbook.
-- Persisted commerce test runs and results.
-- Added admin commerce readiness endpoint.
-- Preserved signed webhook replay protection, Connect onboarding, refunds, disputes, seller transfer ceilings and fail-closed live switches.
-- Added reader order-history APIs.
+### Publishing review gate
+- Existing-book Publishing updates are staged instead of applied immediately.
+- Added durable `publishing_update_reviews` with payload, diff, revision, resolution and reviewer evidence.
+- Added author Apply / Reject actions for pending production revisions.
+- Added field-level diff display in the Launch workspace.
+- Publishing-owned fields move from `needs_review` to `applied` only after author approval.
+- Marketplace-owned price differences remain `preserved`.
 
-### Digital ownership
-- Successful digital purchases now grant ebook/audiobook entitlements.
-- Fully refunded digital items can revoke their entitlement without deleting purchase history.
-- Guest purchases can be claimed by the same YasReady identity email later.
+### Identity + ownership
+- Same YasReady `userId` remains the canonical cross-product subject.
+- Publishing source books still cannot be moved to a different YasReady account.
+- Review resolution verifies the same author/book/link relationship again before mutation.
 
-### Future YasReady. Books app
-- Added hidden versioned app contract.
-- Added app bootstrap/library endpoints.
-- Added device/install registration.
-- Added incremental sync cursor with tombstones.
-- Added optimistic cross-device progress revisions.
-- Added opaque digital-asset manifest model.
-- Added future `yasreadybooks://` deep-link contract.
-- Delivery and push remain disabled.
+### Live-test evidence
+- Added `publishing_handshake_test_runs` and `publishing_handshake_test_events`.
+- Added admin Publishing live-test preflight APIs.
+- Added `PUBLISHING_LIVE_VERIFY.command` for architecture regression checks.
+- Added `PUBLISHING_LIVE_TEST.command` for a real running-Worker smoke test.
+- Added a second-revision handoff example for review testing.
 
-### Safety
-- No live money was enabled.
-- No Books app content delivery was enabled.
-- Publishing and Ingram production switches remain unchanged/off.
+### Launch safety
+- Applying a production update does not make a listing live.
+- Existing readiness and explicit author go-live gates remain separate.
+- `PUBLISHING_LIVE_TEST_ENABLED=false` is now a tracked default.
+
+### Preserved
+- v0.12 Ingram Operations Closure.
+- v0.11 Stripe test commerce and hidden YasReady. Books bridge.
+- Analytics Brain, Marketing Studio, Consumer Marketplace, Catalog Management, Business export, GitHub Pages and YasReady visual parity.

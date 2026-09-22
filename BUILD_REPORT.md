@@ -1,58 +1,39 @@
-# Marketplace | YasReady v0.11.0 — Build Report
+# Marketplace | YasReady v0.13.0 — Build Report
 
-## Release
-**v0.11.0 — Stripe Test Commerce Closure + YasReady. Books App Bridge**
+**Publishing Handshake Live Test**
 
-This release closes the test-commerce architecture while deliberately building the hidden contracts the future YasReady. Books app will consume. Live money, Books content delivery, push, and provider submission remain fail-closed by default.
+## Verified in this build environment
 
-## Verified
-- Core engine tests: **106/106 PASS** (`npm test`)
-- Books app bridge checks: **12/12 PASS**
-- Stripe test closure checks: **10/10 PASS**
-- Analytics Brain checks: **20/20 PASS**
-- UI Closure regression checks: **20/20 PASS**
-- Catalog Management checks: **16/16 PASS**
-- Consumer Marketplace checks: **12/12 PASS**
-- Marketing Studio checks: **16/16 PASS**
-- YasReady visual parity checks: **16/16 PASS**
-- GitHub Pages checks: **7/7 PASS**
-- Publishing Handshake checks: **8/8 PASS**
-- JavaScript syntax checks: **PASS** for `src/main.js`, `src/worker.mjs`, `src/lib/books-app.mjs`, `src/lib/stripe-test-cert.mjs`, and `src/lib/stripe-commerce.mjs`
-- Fresh SQLite migration replay: **13/13 PASS**
-- Fresh schema: **72 application tables**
-- New Books/commerce columns and tables verified after fresh replay.
+- `npm test`: **124/124 PASS**
+- Publishing Handshake verifier: **8/8 PASS**
+- Publishing Live Test verifier: **12/12 PASS**
+- UI Closure: **20/20 PASS**
+- Catalog Management: **16/16 PASS**
+- Consumer Marketplace: **12/12 PASS**
+- Marketing Studio: **16/16 PASS**
+- Analytics Brain: **20/20 PASS**
+- YasReady. Books bridge: **12/12 PASS**
+- Stripe Test Closure: **10/10 PASS**
+- Ingram Operations: **12/12 PASS**
+- YasReady visual parity: **16/16 PASS**
+- GitHub Pages: **7/7 PASS**
+- Fresh database replay: **15/15 migrations PASS**
+- Fresh schema: **81 application tables**
+- New Publishing review/test tables confirmed present
+- JS syntax checks passed for Worker, UI, live-test script and verifier
 
-## Books app bridge included now
-- Versioned contract: `yasready.books.marketplace.v1`
-- Same YasReady identity; no second reader account system
-- Paid ebook/audiobook order → active library entitlement
-- Fully refunded digital order item → entitlement revocation
-- Guest purchase can be claimed by a later YasReady login using the same email
-- Library, Saved, Recent, author follows, and progress remain Marketplace-owned source of truth
-- Cross-device progress revisions with optimistic concurrency
-- Device registration model without storing raw push tokens yet
-- Incremental change feed with sync cursor
-- Future app deep links (`yasreadybooks://...`) plus web fallback
-- Digital content manifests with entitlement checks
-- Actual content delivery and push notifications remain disabled
+## Important behavioral closure
 
-## Stripe test-commerce closure included now
-- Explicit test-mode readiness report
-- Persisted certification runs
-- Eight required scenarios: single-author checkout, multi-author checkout, signed-webhook replay, digital entitlement grant, Connect onboarding, refund reconciliation, transfer ceiling, dispute hold
-- Existing checkout validation, webhook idempotency, refunds, Connect, seller allocations, transfers, and reconciliation retained
-- Reader order-history endpoints reserved for Marketplace / Books app continuity
+- First Publishing receipt creates a safe draft.
+- Later changed production revisions are staged for review.
+- The author can apply or reject a staged revision.
+- Marketplace prices remain protected from Publishing suggestions.
+- Production approval and sale approval remain separate gates.
+- Same-account ownership and replay protection remain enforced.
+- YasReady. Books entitlement/library architecture is unchanged.
 
-## Safety defaults
-The tracked deployment defaults remain fail closed, including:
-- `CHECKOUT_ENABLED=false`
-- `STRIPE_MODE=off`
-- `REFUNDS_ENABLED=false`
-- `TRANSFERS_ENABLED=false`
-- `INGRAM_MODE=off`
-- `BOOKS_APP_BRIDGE_ENABLED=false`
-- `BOOKS_APP_DELIVERY_ENABLED=false`
-- `BOOKS_APP_PUSH_ENABLED=false`
+## Not executed here
 
-## Production bundle note
-`npm run build` was attempted in this execution environment and stopped with `vite: not found` because `node_modules` / Vite are not installed here. Therefore the Vite production bundle is **not marked verified**. The source, schema, engine, feature, Pages, and syntax checks listed above were actually executed and passed.
+The actual networked `PUBLISHING_LIVE_TEST.command` was not run because this build environment is not running the Cloudflare Worker with a configured test secret. The command is included for local/staging execution.
+
+The Vite production bundle is not marked verified because this environment does not have installed npm dependencies/Vite. No claim is made that the production bundle was built here.

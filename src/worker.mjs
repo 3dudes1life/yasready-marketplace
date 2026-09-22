@@ -16,6 +16,7 @@ import {BOOKS_APP_CONTRACT,booksAppCapabilities,normalizeBooksDevice,normalizeBo
 import {STRIPE_TEST_SCENARIOS,stripeTestReadiness,evaluateStripeTestRun} from './lib/stripe-test-cert.mjs';
 import {normalizeCampaignDraft,campaignMetrics,marketingRecommendation,launchKit,shortLinkSlug,channelConfig} from './lib/marketing-studio.mjs';
 import {buildAnalyticsBrain,subtractStats,subtractFormats} from './lib/analytics-brain.mjs';
+import {INGRAM_OPERATIONS_SCHEMA,normalizeTitleMapping,normalizeCostRow,syncFreshness,invoiceVariance,normalizeDeadLetterAction,normalizeExternalSaleRow,ingramOperationsReadiness,summarizeIngramOperations} from './lib/ingram-operations.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -30,6 +31,30 @@ function requireAdmin(request,env){
 }
 function requireProviderSecret(request,env){return !!env.PROVIDER_IMPORT_SECRET&&request.headers.get('x-yasready-provider-secret')===env.PROVIDER_IMPORT_SECRET;}
 function safeAddress(raw){try{return raw?JSON.parse(raw):null}catch{return null}}
+
+const PUBLISHING_LIVE_SCENARIOS=[
+  {code:'signed_receipt',label:'Signed handoff receipt'},
+  {code:'same_account',label:'Same YasReady account ownership'},
+  {code:'replay_protection',label:'Idempotent replay protection'},
+  {code:'review_diff',label:'Existing-book update staged for review'},
+  {code:'price_preservation',label:'Marketplace price preservation'},
+  {code:'author_apply',label:'Author-approved production update'},
+  {code:'author_launch',label:'Explicit author sale gate'},
+  {code:'books_bridge',label:'Digital entitlement bridge remains isolated'}
+];
+function publishingLiveReadiness(env){
+  const enabled=env.PUBLISHING_IMPORT_ENABLED==='true',secret=!!env.PUBLISHING_IMPORT_SECRET,testEnabled=env.PUBLISHING_LIVE_TEST_ENABLED==='true';
+  const checks=[
+    {code:'schema',pass:(env.PUBLISHING_HANDOFF_SCHEMA||PUBLISHING_HANDOFF_SCHEMA)===PUBLISHING_HANDOFF_SCHEMA,required:true},
+    {code:'import_gate',pass:enabled,required:false},
+    {code:'signature_secret',pass:secret,required:false},
+    {code:'test_gate',pass:testEnabled,required:false},
+    {code:'author_launch_separate',pass:true,required:true},
+    {code:'books_bridge_isolated',pass:env.BOOKS_APP_DELIVERY_ENABLED!=='true',required:true}
+  ];
+  const required=checks.filter(x=>x.required),passedRequired=required.filter(x=>x.pass).length;
+  return {schema:PUBLISHING_HANDOFF_SCHEMA,status:passedRequired===required.length?'architecture_ready':'blocked',passedRequired,totalRequired:required.length,checks,liveImportEnabled:enabled,liveTestEnabled:testEnabled,signatureConfigured:secret};
+}
 
 async function reconcileStripeOrder(env,orderId){
   const order=await env.DB.prepare(`SELECT * FROM orders WHERE id=?`).bind(orderId).first();
@@ -319,10 +344,33 @@ async function ensurePublishingAuthor(env,incoming){
   return env.DB.prepare(`SELECT * FROM authors WHERE id=?`).bind(id).first();
 }
 
+async function applyPublishingUpdateSnapshot(env,{incoming,link,book,importId,payloadHash,receivedAt}){
+  const currentEditions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=?`).bind(book.id));
+  const changes=computePublishingDiff({currentBook:book,currentEditions,incoming});
+  await env.DB.prepare(`UPDATE books SET title=?,subtitle=?,description=?,long_description=?,cover_url=?,primary_category=?,source_revision=?,production_sync_status='synced',production_synced_at=?,updated_at=? WHERE id=?`).bind(incoming.book.title,incoming.book.subtitle,incoming.book.description,incoming.book.longDescription,incoming.book.coverUrl,incoming.book.primaryCategory,incoming.sourceRevision,receivedAt,receivedAt,book.id).run();
+  const currentBySource=new Map(currentEditions.map(e=>[e.publishing_source_edition_id,e]));
+  for(const e of incoming.editions){
+    const cur=currentBySource.get(e.sourceEditionId);
+    if(cur){
+      await env.DB.prepare(`UPDATE editions SET format=?,isbn=?,fulfillment_provider=?,provider_title_id=?,provider_sku=?,production_status=?,artifact_ref=?,artifact_hash=?,production_synced_at=?,updated_at=? WHERE id=?`).bind(e.format,e.isbn,e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,cur.id).run();
+      await env.DB.prepare(`UPDATE publishing_edition_links SET source_revision=?,production_status=?,artifact_ref=?,artifact_hash=?,last_received_at=?,last_applied_at=?,updated_at=? WHERE publishing_source_edition_id=?`).bind(incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,e.sourceEditionId).run();
+    } else {
+      const editionId=uuid();
+      await env.DB.prepare(`INSERT INTO editions (id,book_id,format,isbn,currency,price_minor,status,fulfillment_provider,provider_title_id,provider_sku,inventory_status,publishing_source_edition_id,production_status,artifact_ref,artifact_hash,production_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(editionId,book.id,e.format,e.isbn,e.currency,e.suggestedPriceMinor||0,'draft',e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.format==='ebook'||e.format==='audiobook'?'available':'unknown',e.sourceEditionId,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt).run();
+      await env.DB.prepare(`INSERT INTO publishing_edition_links (id,publishing_book_link_id,edition_id,publishing_source_edition_id,source_revision,production_status,artifact_ref,artifact_hash,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),link.id,editionId,e.sourceEditionId,incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,receivedAt).run();
+    }
+  }
+  await env.DB.prepare(`UPDATE publishing_book_links SET source_schema_version=?,source_revision=?,latest_payload_hash=?,production_status='synced',last_received_at=?,last_applied_at=?,updated_at=? WHERE id=?`).bind(incoming.schema,incoming.sourceRevision,payloadHash,receivedAt,receivedAt,receivedAt,link.id).run();
+  return changes;
+}
+
 async function applyPublishingHandoff(env,raw,rawText){
   const incoming=normalizePublishingHandoff(raw),payloadHash=await sha256Hex(rawText||raw),receivedAt=now();
   const replay=await env.DB.prepare(`SELECT * FROM publishing_imports WHERE publishing_source_id=? AND payload_hash=? LIMIT 1`).bind(incoming.sourceBookId,payloadHash).first();
-  if(replay) return {replayed:true,importId:replay.id,bookId:replay.book_id||null,status:replay.status,disposition:replay.disposition||'duplicate'};
+  if(replay){
+    const review=replay.book_id?await env.DB.prepare(`SELECT id,status FROM publishing_update_reviews WHERE import_id=? LIMIT 1`).bind(replay.id).first():null;
+    return {replayed:true,importId:replay.id,bookId:replay.book_id||null,status:review?.status==='pending'?'review_required':replay.status,reviewId:review?.id||null,disposition:replay.disposition||'duplicate'};
+  }
   const author=await ensurePublishingAuthor(env,incoming);
   let link=await env.DB.prepare(`SELECT * FROM publishing_book_links WHERE publishing_source_id=? LIMIT 1`).bind(incoming.sourceBookId).first();
   if(link&&link.user_id!==incoming.userId) throw new Error('publishing_source_owned_by_different_user');
@@ -347,32 +395,64 @@ async function applyPublishingHandoff(env,raw,rawText){
         await env.DB.prepare(`INSERT INTO publishing_edition_links (id,publishing_book_link_id,edition_id,publishing_source_edition_id,source_revision,production_status,artifact_ref,artifact_hash,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),link.id,editionId,e.sourceEditionId,incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,receivedAt).run();
       }
       book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(bookId).first();
-    } else {
-      book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(link.book_id).first(); if(!book) throw new Error('linked_book_missing');
-      if(book.author_id!==author.id) throw new Error('publishing_author_mapping_conflict');
-      const currentEditions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=?`).bind(book.id));
-      const changes=computePublishingDiff({currentBook:book,currentEditions,incoming});
-      await env.DB.prepare(`UPDATE books SET title=?,subtitle=?,description=?,long_description=?,cover_url=?,primary_category=?,source_revision=?,production_sync_status='synced',production_synced_at=?,updated_at=? WHERE id=?`).bind(incoming.book.title,incoming.book.subtitle,incoming.book.description,incoming.book.longDescription,incoming.book.coverUrl,incoming.book.primaryCategory,incoming.sourceRevision,receivedAt,receivedAt,book.id).run();
-      const currentBySource=new Map(currentEditions.map(e=>[e.publishing_source_edition_id,e]));
-      for(const e of incoming.editions){
-        const cur=currentBySource.get(e.sourceEditionId);
-        if(cur){
-          await env.DB.prepare(`UPDATE editions SET format=?,isbn=?,fulfillment_provider=?,provider_title_id=?,provider_sku=?,production_status=?,artifact_ref=?,artifact_hash=?,production_synced_at=?,updated_at=? WHERE id=?`).bind(e.format,e.isbn,e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,cur.id).run();
-          await env.DB.prepare(`UPDATE publishing_edition_links SET source_revision=?,production_status=?,artifact_ref=?,artifact_hash=?,last_received_at=?,last_applied_at=?,updated_at=? WHERE publishing_source_edition_id=?`).bind(incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,e.sourceEditionId).run();
-        } else {
-          const editionId=uuid();
-          await env.DB.prepare(`INSERT INTO editions (id,book_id,format,isbn,currency,price_minor,status,fulfillment_provider,provider_title_id,provider_sku,inventory_status,publishing_source_edition_id,production_status,artifact_ref,artifact_hash,production_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(editionId,book.id,e.format,e.isbn,e.currency,e.suggestedPriceMinor||0,'draft',e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.format==='ebook'||e.format==='audiobook'?'available':'unknown',e.sourceEditionId,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt).run();
-          await env.DB.prepare(`INSERT INTO publishing_edition_links (id,publishing_book_link_id,edition_id,publishing_source_edition_id,source_revision,production_status,artifact_ref,artifact_hash,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),link.id,editionId,e.sourceEditionId,incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,receivedAt).run();
-        }
-      }
-      for(const c of changes){const ed=c.sourceEditionId?await env.DB.prepare(`SELECT id FROM editions WHERE publishing_source_edition_id=?`).bind(c.sourceEditionId).first():null;await env.DB.prepare(`INSERT INTO publishing_sync_changes (id,import_id,book_id,edition_id,entity_type,field_name,ownership,old_value_json,incoming_value_json,disposition,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),importId,book.id,ed?.id||null,c.entityType,c.fieldName,c.ownership,JSON.stringify(c.oldValue),JSON.stringify(c.incomingValue),c.disposition,receivedAt).run();}
-      await env.DB.prepare(`UPDATE publishing_book_links SET source_schema_version=?,source_revision=?,latest_payload_hash=?,production_status='synced',last_received_at=?,last_applied_at=?,updated_at=? WHERE id=?`).bind(incoming.schema,incoming.sourceRevision,payloadHash,receivedAt,receivedAt,receivedAt,link.id).run();
-      book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(book.id).first();
+      await env.DB.prepare(`UPDATE publishing_imports SET status='applied',applied_at=?,book_id=?,disposition='created_draft',latest_received_at=? WHERE id=?`).bind(receivedAt,book.id,receivedAt,importId).run();
+      await audit(env,{actorType:'service',actorId:'publishing',action:'publishing.book_received',objectType:'book',objectId:book.id,metadata:{sourceBookId:incoming.sourceBookId,sourceRevision:incoming.sourceRevision,payloadHash}});
+      return {replayed:false,importId,bookId:book.id,created:true,status:'applied',disposition:'created_draft'};
     }
-    await env.DB.prepare(`UPDATE publishing_imports SET status='applied',applied_at=?,book_id=?,disposition=?,latest_received_at=? WHERE id=?`).bind(receivedAt,book.id,created?'created_draft':'synced_production_fields',receivedAt,importId).run();
-    await audit(env,{actorType:'service',actorId:'publishing',action:created?'publishing.book_received':'publishing.book_synced',objectType:'book',objectId:book.id,metadata:{sourceBookId:incoming.sourceBookId,sourceRevision:incoming.sourceRevision,payloadHash}});
-    return {replayed:false,importId,bookId:book.id,created,status:'applied',disposition:created?'created_draft':'synced_production_fields'};
+
+    book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(link.book_id).first(); if(!book) throw new Error('linked_book_missing');
+    if(book.author_id!==author.id) throw new Error('publishing_author_mapping_conflict');
+    const currentEditions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=?`).bind(book.id));
+    const rawChanges=computePublishingDiff({currentBook:book,currentEditions,incoming});
+    const changes=rawChanges.map(c=>c.ownership==='publishing'&&c.disposition==='applied'?{...c,disposition:'needs_review'}:c);
+    const material=changes.filter(c=>c.ownership==='publishing'&&c.disposition==='needs_review');
+    if(!material.length){
+      for(const c of changes){const ed=c.sourceEditionId?await env.DB.prepare(`SELECT id FROM editions WHERE publishing_source_edition_id=?`).bind(c.sourceEditionId).first():null;await env.DB.prepare(`INSERT INTO publishing_sync_changes (id,import_id,book_id,edition_id,entity_type,field_name,ownership,old_value_json,incoming_value_json,disposition,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),importId,book.id,ed?.id||null,c.entityType,c.fieldName,c.ownership,JSON.stringify(c.oldValue),JSON.stringify(c.incomingValue),c.disposition,receivedAt).run();}
+      await env.DB.prepare(`UPDATE publishing_imports SET status='applied',applied_at=?,book_id=?,disposition='no_production_change',latest_received_at=? WHERE id=?`).bind(receivedAt,book.id,receivedAt,importId).run();
+      await env.DB.prepare(`UPDATE publishing_book_links SET latest_payload_hash=?,last_received_at=?,updated_at=? WHERE id=?`).bind(payloadHash,receivedAt,receivedAt,link.id).run();
+      return {replayed:false,importId,bookId:book.id,created:false,status:'applied',disposition:'no_production_change'};
+    }
+    const reviewId=uuid();
+    await env.DB.prepare(`INSERT INTO publishing_update_reviews (id,import_id,publishing_book_link_id,book_id,author_id,source_revision,payload_hash,payload_json,diff_json,status,received_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'pending',?,?,?)`).bind(reviewId,importId,link.id,book.id,author.id,incoming.sourceRevision,payloadHash,JSON.stringify(incoming),JSON.stringify(changes),receivedAt,receivedAt,receivedAt).run();
+    for(const c of changes){const ed=c.sourceEditionId?await env.DB.prepare(`SELECT id FROM editions WHERE publishing_source_edition_id=?`).bind(c.sourceEditionId).first():null;await env.DB.prepare(`INSERT INTO publishing_sync_changes (id,import_id,book_id,edition_id,entity_type,field_name,ownership,old_value_json,incoming_value_json,disposition,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),importId,book.id,ed?.id||null,c.entityType,c.fieldName,c.ownership,JSON.stringify(c.oldValue),JSON.stringify(c.incomingValue),c.disposition,receivedAt).run();}
+    await env.DB.prepare(`UPDATE publishing_imports SET status='review_required',book_id=?,disposition='staged_for_author_review',latest_received_at=? WHERE id=?`).bind(book.id,receivedAt,importId).run();
+    await env.DB.prepare(`UPDATE books SET production_sync_status='review_required',updated_at=? WHERE id=?`).bind(receivedAt,book.id).run();
+    await env.DB.prepare(`UPDATE publishing_book_links SET latest_payload_hash=?,last_received_at=?,production_status='review_required',updated_at=? WHERE id=?`).bind(payloadHash,receivedAt,receivedAt,link.id).run();
+    await audit(env,{actorType:'service',actorId:'publishing',action:'publishing.update_staged',objectType:'book',objectId:book.id,metadata:{reviewId,sourceRevision:incoming.sourceRevision,changedFields:material.map(x=>`${x.entityType}.${x.fieldName}`)}});
+    return {replayed:false,importId,bookId:book.id,created:false,status:'review_required',reviewId,disposition:'staged_for_author_review',changes};
   }catch(err){await env.DB.prepare(`UPDATE publishing_imports SET status='failed',error_summary=?,disposition='rejected',latest_received_at=? WHERE id=?`).bind(String(err.message||err).slice(0,500),receivedAt,importId).run();throw err;}
+}
+
+async function publishingReviewForAuthor(env,author,bookId){
+  const book=await env.DB.prepare(`SELECT id,title,source_revision,production_sync_status FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return null;
+  const review=await env.DB.prepare(`SELECT * FROM publishing_update_reviews WHERE book_id=? AND author_id=? AND status='pending' ORDER BY created_at DESC LIMIT 1`).bind(bookId,author.id).first();
+  if(!review)return {book,review:null};
+  return {book,review:{...review,payload:JSON.parse(review.payload_json||'{}'),diff:JSON.parse(review.diff_json||'[]')}};
+}
+
+async function resolvePublishingReview(env,author,bookId,reviewId,action,note=''){
+  const review=await env.DB.prepare(`SELECT pur.*,pbl.user_id,pbl.id link_id FROM publishing_update_reviews pur JOIN publishing_book_links pbl ON pbl.id=pur.publishing_book_link_id WHERE pur.id=? AND pur.book_id=? AND pur.author_id=?`).bind(reviewId,bookId,author.id).first();
+  if(!review) throw new Error('publishing_review_not_found');
+  if(review.status!=='pending') throw new Error('publishing_review_already_resolved');
+  const stamp=now();
+  if(action==='reject'){
+    await env.DB.prepare(`UPDATE publishing_update_reviews SET status='rejected',reviewed_at=?,reviewed_by_user_id=?,resolution_note=?,updated_at=? WHERE id=?`).bind(stamp,author.user_id,note||null,stamp,reviewId).run();
+    await env.DB.prepare(`UPDATE publishing_imports SET status='rejected',disposition='author_rejected',latest_received_at=? WHERE id=?`).bind(stamp,review.import_id).run();
+    await env.DB.prepare(`UPDATE books SET production_sync_status='review_rejected',updated_at=? WHERE id=?`).bind(stamp,bookId).run();
+    await env.DB.prepare(`UPDATE publishing_book_links SET production_status='review_rejected',updated_at=? WHERE id=?`).bind(stamp,review.link_id).run();
+    await audit(env,{actorType:'author',actorId:author.id,action:'publishing.update_rejected',objectType:'book',objectId:bookId,metadata:{reviewId,note}});
+    return {status:'rejected'};
+  }
+  const incoming=normalizePublishingHandoff(JSON.parse(review.payload_json));
+  if(incoming.userId!==author.user_id) throw new Error('publishing_review_identity_mismatch');
+  const link=await env.DB.prepare(`SELECT * FROM publishing_book_links WHERE id=? AND book_id=?`).bind(review.link_id,bookId).first();
+  const book=await env.DB.prepare(`SELECT * FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!link||!book)throw new Error('publishing_review_link_missing');
+  await applyPublishingUpdateSnapshot(env,{incoming,link,book,importId:review.import_id,payloadHash:review.payload_hash,receivedAt:stamp});
+  await env.DB.prepare(`UPDATE publishing_sync_changes SET disposition=CASE WHEN ownership='publishing' AND disposition='needs_review' THEN 'applied' ELSE disposition END WHERE import_id=?`).bind(review.import_id).run();
+  await env.DB.prepare(`UPDATE publishing_update_reviews SET status='applied',reviewed_at=?,reviewed_by_user_id=?,resolution_note=?,updated_at=? WHERE id=?`).bind(stamp,author.user_id,note||null,stamp,reviewId).run();
+  await env.DB.prepare(`UPDATE publishing_imports SET status='applied',applied_at=?,disposition='author_approved_update',latest_received_at=? WHERE id=?`).bind(stamp,stamp,review.import_id).run();
+  await audit(env,{actorType:'author',actorId:author.id,action:'publishing.update_approved',objectType:'book',objectId:bookId,metadata:{reviewId,sourceRevision:incoming.sourceRevision}});
+  return {status:'applied',sourceRevision:incoming.sourceRevision};
 }
 
 async function authorBookReadiness(env,author,bookId){
@@ -429,9 +509,27 @@ async function marketingShortRedirect(request,env){
   return Response.redirect(row.destination_url,302);
 }
 
+async function ingramOperationsSnapshot(env,authorId=null){
+  const maxAgeHours=Math.max(1,Number(env.INGRAM_FEED_MAX_AGE_HOURS||168));
+  const authorWhere=authorId?' AND b.author_id=?':'';
+  const physical=await all(authorId?
+    env.DB.prepare(`SELECT e.id edition_id,e.book_id,e.format,e.isbn,e.provider_title_id,e.provider_sku,e.provider_cost_minor,e.inventory_status,b.author_id,b.title,m.mapping_status,m.unit_cost_minor mapping_cost_minor,m.cost_captured_at,m.metadata_verified_at,m.inventory_verified_at,m.last_verified_at,(SELECT captured_at FROM provider_metadata_snapshots pms WHERE pms.provider='ingram' AND pms.isbn=e.isbn ORDER BY captured_at DESC LIMIT 1) metadata_captured_at,(SELECT captured_at FROM provider_inventory_snapshots pis WHERE pis.provider='ingram' AND pis.isbn=e.isbn ORDER BY captured_at DESC LIMIT 1) inventory_captured_at FROM editions e JOIN books b ON b.id=e.book_id LEFT JOIN provider_title_mappings m ON m.provider='ingram' AND m.edition_id=e.id WHERE e.fulfillment_provider='ingram' AND e.format IN ('paperback','hardcover')${authorWhere} ORDER BY b.title,e.format`).bind(authorId):
+    env.DB.prepare(`SELECT e.id edition_id,e.book_id,e.format,e.isbn,e.provider_title_id,e.provider_sku,e.provider_cost_minor,e.inventory_status,b.author_id,b.title,m.mapping_status,m.unit_cost_minor mapping_cost_minor,m.cost_captured_at,m.metadata_verified_at,m.inventory_verified_at,m.last_verified_at,(SELECT captured_at FROM provider_metadata_snapshots pms WHERE pms.provider='ingram' AND pms.isbn=e.isbn ORDER BY captured_at DESC LIMIT 1) metadata_captured_at,(SELECT captured_at FROM provider_inventory_snapshots pis WHERE pis.provider='ingram' AND pis.isbn=e.isbn ORDER BY captured_at DESC LIMIT 1) inventory_captured_at FROM editions e JOIN books b ON b.id=e.book_id LEFT JOIN provider_title_mappings m ON m.provider='ingram' AND m.edition_id=e.id WHERE e.fulfillment_provider='ingram' AND e.format IN ('paperback','hardcover') ORDER BY b.title,e.format`));
+  const mappings=physical.map(x=>({...x,metadataFreshness:syncFreshness(x.metadata_captured_at||x.metadata_verified_at,{maxAgeHours}),inventoryFreshness:syncFreshness(x.inventory_captured_at||x.inventory_verified_at,{maxAgeHours}),effectiveCostMinor:Number(x.mapping_cost_minor??x.provider_cost_minor??0)||null,mapped:!!(x.provider_title_id||x.provider_sku||x.mapping_status)}));
+  const jobs=await all(authorId?env.DB.prepare(`SELECT fj.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot,e.isbn,e.provider_sku FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id LEFT JOIN editions e ON e.id=oi.edition_id WHERE fj.provider='ingram' AND oi.author_id=? ORDER BY fj.created_at DESC LIMIT 250`).bind(authorId):env.DB.prepare(`SELECT fj.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot,e.isbn,e.provider_sku FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id LEFT JOIN editions e ON e.id=oi.edition_id WHERE fj.provider='ingram' ORDER BY fj.created_at DESC LIMIT 250`));
+  const shipments=await all(authorId?env.DB.prepare(`SELECT sp.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot FROM shipment_packages sp JOIN fulfillment_jobs fj ON fj.id=sp.fulfillment_job_id JOIN order_items oi ON oi.id=fj.order_item_id WHERE sp.provider='ingram' AND oi.author_id=? ORDER BY sp.created_at DESC LIMIT 100`).bind(authorId):env.DB.prepare(`SELECT sp.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot FROM shipment_packages sp JOIN fulfillment_jobs fj ON fj.id=sp.fulfillment_job_id JOIN order_items oi ON oi.id=fj.order_item_id WHERE sp.provider='ingram' ORDER BY sp.created_at DESC LIMIT 100`));
+  const deadLetters=await all(authorId?env.DB.prepare(`SELECT * FROM provider_dead_letters WHERE provider='ingram' AND author_id=? ORDER BY last_seen_at DESC LIMIT 100`).bind(authorId):env.DB.prepare(`SELECT * FROM provider_dead_letters WHERE provider='ingram' ORDER BY last_seen_at DESC LIMIT 250`));
+  const reconciliationCases=await all(authorId?env.DB.prepare(`SELECT prc.* FROM provider_reconciliation_cases prc WHERE prc.provider='ingram' AND (prc.order_id IN (SELECT DISTINCT order_id FROM order_items WHERE author_id=?) OR prc.order_item_id IN (SELECT id FROM order_items WHERE author_id=?)) ORDER BY prc.opened_at DESC LIMIT 100`).bind(authorId,authorId):env.DB.prepare(`SELECT * FROM provider_reconciliation_cases WHERE provider='ingram' ORDER BY opened_at DESC LIMIT 250`));
+  const syncs=await all(env.DB.prepare(`SELECT * FROM provider_sync_cursors WHERE provider='ingram' ORDER BY sync_type`));
+  const externalSales=await all(authorId?env.DB.prepare(`SELECT * FROM external_channel_sales WHERE provider='ingram' AND author_id=? ORDER BY sale_date DESC LIMIT 200`).bind(authorId):env.DB.prepare(`SELECT * FROM external_channel_sales WHERE provider='ingram' ORDER BY sale_date DESC LIMIT 500`));
+  const metrics={physicalEditions:mappings.length,mappedPhysicalEditions:mappings.filter(x=>x.mapped).length,staleMetadata:mappings.filter(x=>x.metadataFreshness.status==='stale').length,missingMetadata:mappings.filter(x=>x.metadataFreshness.status==='missing').length,staleInventory:mappings.filter(x=>x.inventoryFreshness.status==='stale').length,missingInventory:mappings.filter(x=>x.inventoryFreshness.status==='missing').length,openDeadLetters:deadLetters.filter(x=>x.status==='open').length,openReconciliationCases:reconciliationCases.filter(x=>['open','review'].includes(x.status)).length};
+  const readiness=ingramOperationsReadiness(env,metrics),summary=summarizeIngramOperations({jobs,deadLetters,mappings,syncs,reconciliationCases,externalSales});
+  return {schema:INGRAM_OPERATIONS_SCHEMA,summary,readiness,metrics,mappings,jobs,shipments,deadLetters,reconciliationCases,syncs,externalSales};
+}
+
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.11.0',commerce:commerceReadiness(env),stripeTest:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.13.0',commerce:commerceReadiness(env),stripeTest:stripeTestReadiness(env),booksApp:booksAppCapabilities(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -549,6 +647,7 @@ async function api(request,env){
       const [books,stats]=await Promise.all([getAuthorBooks(env,author.id),authorStats(env,author.id,30)]);
       return json({ok:true,author,books,stats,sharedIdentity:publicIdentity(auth.identity)});
     }
+    if(path==='/api/me/ingram/operations'&&request.method==='GET') return json({ok:true,...await ingramOperationsSnapshot(env,author.id)});
     if(path==='/api/me/books'&&request.method==='GET') return json({ok:true,books:await getAuthorBooks(env,author.id)});
     if(path.match(/^\/api\/me\/books\/[^/]+\/editor$/)&&request.method==='GET'){
       const bookId=decodeURIComponent(path.split('/')[4]),state=await catalogEditorState(env,author,bookId);if(!state)return json({ok:false,error:'book_not_owned'},404);
@@ -676,13 +775,22 @@ async function api(request,env){
     if(path==='/api/me/publishing/imports'&&request.method==='GET'){
       const imports=await all(env.DB.prepare(`SELECT pi.id,pi.publishing_source_id,pi.schema_version,pi.source_revision,pi.payload_hash,pi.status,pi.disposition,pi.received_at,pi.applied_at,pi.error_summary,pi.book_id,b.title FROM publishing_imports pi LEFT JOIN books b ON b.id=pi.book_id WHERE pi.user_id=? ORDER BY pi.received_at DESC LIMIT 100`).bind(auth.identity.userId));
       const links=await all(env.DB.prepare(`SELECT pbl.*,b.title,b.slug,l.status listing_status,l.visibility FROM publishing_book_links pbl JOIN books b ON b.id=pbl.book_id LEFT JOIN listings l ON l.book_id=b.id WHERE pbl.user_id=? ORDER BY pbl.updated_at DESC`).bind(auth.identity.userId));
-      return json({ok:true,schema:PUBLISHING_HANDOFF_SCHEMA,imports,links});
+      const reviews=await all(env.DB.prepare(`SELECT pur.id,pur.book_id,pur.import_id,pur.source_revision,pur.status,pur.received_at,pur.reviewed_at,pur.resolution_note,b.title FROM publishing_update_reviews pur JOIN books b ON b.id=pur.book_id WHERE pur.author_id=? ORDER BY pur.created_at DESC LIMIT 100`).bind(author.id));
+      return json({ok:true,schema:PUBLISHING_HANDOFF_SCHEMA,imports,links,reviews});
     }
     if(path==='/api/me/publishing/changes'&&request.method==='GET'){
       const bookId=url.searchParams.get('bookId'); if(!bookId)return json({ok:false,error:'book_id_required'},400);
       const book=await env.DB.prepare(`SELECT id FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return json({ok:false,error:'book_not_owned'},404);
       const changes=await all(env.DB.prepare(`SELECT psc.*,pi.source_revision,pi.received_at FROM publishing_sync_changes psc JOIN publishing_imports pi ON pi.id=psc.import_id WHERE psc.book_id=? ORDER BY psc.created_at DESC LIMIT 250`).bind(bookId));
       return json({ok:true,bookId,changes});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/publishing-review$/)&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.split('/')[4]),out=await publishingReviewForAuthor(env,author,bookId);if(!out)return json({ok:false,error:'book_not_owned'},404);
+      return json({ok:true,...out});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/publishing-review\/[^/]+\/(apply|reject)$/)&&request.method==='POST'){
+      const parts=path.split('/'),bookId=decodeURIComponent(parts[4]),reviewId=decodeURIComponent(parts[6]),action=parts[7],body=await safeJson(request)||{};
+      try{return json({ok:true,bookId,reviewId,...await resolvePublishingReview(env,author,bookId,reviewId,action,body.note||'')});}catch(err){const msg=String(err.message||err);return json({ok:false,error:msg},msg.includes('not_found')?404:409)}
     }
     if(path.match(/^\/api\/me\/books\/[^/]+\/readiness$/)&&request.method==='GET'){
       const bookId=decodeURIComponent(path.split('/')[4]),out=await authorBookReadiness(env,author,bookId); if(!out)return json({ok:false,error:'book_not_owned'},404);
@@ -771,6 +879,25 @@ async function api(request,env){
 
   if(path==='/api/providers/ingram/readiness'&&request.method==='GET') return json({ok:true,...ingramReadiness(env),lifecycle:['metadata','stock','purchase_order','purchase_order_ack','pick_pack','asn','invoice'],publicBasis:'Ingram CDF/EDI retailer lifecycle; transport remains agreement-specific.'});
 
+  if(path==='/api/admin/ingram/operations'&&request.method==='GET'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);return json({ok:true,...await ingramOperationsSnapshot(env,null)});
+  }
+  if(path==='/api/admin/ingram/title-mappings'&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const body=await safeJson(request)||{};let mapping;try{mapping=normalizeTitleMapping(body)}catch(err){return json({ok:false,error:String(err.message||err)},400)}
+    const edition=await env.DB.prepare(`SELECT e.*,b.author_id,b.id book_id FROM editions e JOIN books b ON b.id=e.book_id WHERE e.id=?`).bind(mapping.editionId).first();if(!edition)return json({ok:false,error:'edition_not_found'},404);if(!['paperback','hardcover'].includes(String(edition.format).toLowerCase()))return json({ok:false,error:'physical_edition_required'},409);if(edition.isbn&&String(edition.isbn).replace(/[^0-9Xx]/g,'')!==mapping.isbn)return json({ok:false,error:'isbn_mismatch_production_truth'},409);
+    const stamp=now(),id=uuid();await env.DB.prepare(`INSERT INTO provider_title_mappings (id,provider,edition_id,isbn,provider_title_id,provider_sku,mapping_status,source,source_reference,unit_cost_minor,currency,cost_captured_at,metadata_verified_at,inventory_verified_at,last_verified_at,notes,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,edition_id) DO UPDATE SET isbn=excluded.isbn,provider_title_id=excluded.provider_title_id,provider_sku=excluded.provider_sku,mapping_status=excluded.mapping_status,source=excluded.source,source_reference=excluded.source_reference,unit_cost_minor=COALESCE(excluded.unit_cost_minor,provider_title_mappings.unit_cost_minor),currency=excluded.currency,cost_captured_at=COALESCE(excluded.cost_captured_at,provider_title_mappings.cost_captured_at),metadata_verified_at=COALESCE(excluded.metadata_verified_at,provider_title_mappings.metadata_verified_at),inventory_verified_at=COALESCE(excluded.inventory_verified_at,provider_title_mappings.inventory_verified_at),last_verified_at=excluded.last_verified_at,notes=excluded.notes,updated_at=excluded.updated_at`).bind(id,'ingram',mapping.editionId,mapping.isbn,mapping.providerTitleId,mapping.providerSku,mapping.status,mapping.source,mapping.sourceReference,mapping.unitCostMinor,mapping.currency,mapping.unitCostMinor!=null?stamp:null,mapping.metadataVerifiedAt,mapping.inventoryVerifiedAt,stamp,mapping.notes,stamp,stamp).run();
+    await env.DB.prepare(`UPDATE editions SET provider_title_id=COALESCE(?,provider_title_id),provider_sku=COALESCE(?,provider_sku),provider_cost_minor=COALESCE(?,provider_cost_minor),updated_at=? WHERE id=?`).bind(mapping.providerTitleId,mapping.providerSku,mapping.unitCostMinor,stamp,mapping.editionId).run();await audit(env,{actorType:'admin',actorId:'commerce-admin',action:'ingram.title_mapping.upserted',objectType:'edition',objectId:mapping.editionId,metadata:{status:mapping.status,source:mapping.source}});return json({ok:true,mapping:{...mapping,lastVerifiedAt:stamp}},201);
+  }
+  if(path==='/api/admin/ingram/readiness/run'&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const snap=await ingramOperationsSnapshot(env,null),id=uuid(),stamp=now();await env.DB.prepare(`INSERT INTO provider_readiness_runs (id,provider,operations_schema,mode,status,passed_required,total_required,summary_json,started_at,completed_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(id,'ingram',INGRAM_OPERATIONS_SCHEMA,env.INGRAM_MODE||'off',snap.readiness.status,snap.readiness.passedRequired,snap.readiness.totalRequired,JSON.stringify({metrics:snap.metrics,summary:snap.summary}),stamp,stamp,'commerce-admin').run();for(const item of snap.readiness.checks)await env.DB.prepare(`INSERT INTO provider_readiness_items (id,run_id,check_code,label,required,passed,detail,evidence_json) VALUES (?,?,?,?,?,?,?,?)`).bind(uuid(),id,item.code,item.label,item.required?1:0,item.pass?1:0,item.detail,JSON.stringify({mode:env.INGRAM_MODE||'off'})).run();return json({ok:true,runId:id,...snap.readiness},201);
+  }
+  if(path.match(/^\/api\/admin\/ingram\/dead-letters\/[^/]+\/action$/)&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const id=decodeURIComponent(path.split('/')[5]),body=await safeJson(request)||{};let action;try{action=normalizeDeadLetterAction(body)}catch(err){return json({ok:false,error:String(err.message||err)},400)}const row=await env.DB.prepare(`SELECT * FROM provider_dead_letters WHERE id=? AND provider='ingram'`).bind(id).first();if(!row)return json({ok:false,error:'dead_letter_not_found'},404);const stamp=now(),status=action.action==='retry'?'open':action.action==='resolve'?'resolved':'ignored';await env.DB.prepare(`UPDATE provider_dead_letters SET status=?,attempts=attempts+CASE WHEN ?='retry' THEN 1 ELSE 0 END,last_seen_at=?,resolved_at=CASE WHEN ?='retry' THEN NULL ELSE ? END,resolution_note=?,resolution_code=?,resolved_by=? WHERE id=?`).bind(status,action.action,stamp,action.action,stamp,action.note,action.action,'commerce-admin',id).run();await env.DB.prepare(`INSERT INTO provider_dead_letter_events (id,dead_letter_id,provider,action,actor_type,actor_id,note,occurred_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?)`).bind(uuid(),id,'ingram',action.action,'admin','commerce-admin',action.note,stamp,JSON.stringify({recordType:row.record_type,reasonCode:row.reason_code})).run();return json({ok:true,id,status,action:action.action});
+  }
+  if(path.match(/^\/api\/admin\/ingram\/reconciliation\/[^/]+\/action$/)&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);const id=decodeURIComponent(path.split('/')[5]),body=await safeJson(request)||{},action=String(body.action||'').toLowerCase();if(!['resolve','ignore','review'].includes(action))return json({ok:false,error:'reconciliation_action_invalid'},400);if(['resolve','ignore'].includes(action)&&!String(body.note||'').trim())return json({ok:false,error:'resolution_note_required'},400);const status=action==='resolve'?'resolved':action==='ignore'?'ignored':'review',stamp=now();const out=await env.DB.prepare(`UPDATE provider_reconciliation_cases SET status=?,resolved_at=CASE WHEN ? IN ('resolved','ignored') THEN ? ELSE NULL END,resolved_by=CASE WHEN ? IN ('resolved','ignored') THEN 'commerce-admin' ELSE resolved_by END,resolution_note=COALESCE(?,resolution_note) WHERE id=? AND provider='ingram'`).bind(status,status,stamp,status,String(body.note||'').trim()||null,id).run();return Number(out.meta?.changes||0)?json({ok:true,id,status}):json({ok:false,error:'reconciliation_case_not_found'},404);
+  }
+
   if(path==='/api/admin/ingram/queue'&&request.method==='GET'){
     if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
     const jobs=await all(env.DB.prepare(`SELECT fj.*,oi.order_id,oi.author_id,oi.title_snapshot,oi.format_snapshot,e.isbn,e.provider_sku FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id LEFT JOIN editions e ON e.id=oi.edition_id WHERE fj.provider='ingram' ORDER BY CASE fj.status WHEN 'failed' THEN 0 WHEN 'queued' THEN 1 WHEN 'ready' THEN 2 ELSE 3 END,fj.created_at LIMIT 250`));
@@ -799,7 +926,7 @@ async function api(request,env){
     if(env.INGRAM_METADATA_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_metadata_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
     const body=await safeJson(request),rows=Array.isArray(body?.rows)?body.rows:[];if(!rows.length)return json({ok:false,error:'rows_required'},400);
     const runId=uuid(),started=now();await env.DB.prepare(`INSERT INTO provider_sync_runs (id,provider,sync_type,status,started_at,rows_seen,rows_written) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','metadata_feed','running',started,rows.length,0).run();let written=0,failed=0;
-    for(const raw of rows){try{const x=normalizeMetadataRow(raw);await env.DB.prepare(`INSERT INTO provider_metadata_snapshots (id,provider,isbn,title,author,publisher,imprint,format,cover_url,publication_date,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.title,x.author,x.publisher,x.imprint,x.format,x.coverUrl,x.publicationDate,body.sourceReference||null,now(),JSON.stringify(raw)).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','metadata',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
+    for(const raw of rows){try{const x=normalizeMetadataRow(raw);await env.DB.prepare(`INSERT INTO provider_metadata_snapshots (id,provider,isbn,title,author,publisher,imprint,format,cover_url,publication_date,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.title,x.author,x.publisher,x.imprint,x.format,x.coverUrl,x.publicationDate,body.sourceReference||null,now(),JSON.stringify(raw)).run();const ed=await env.DB.prepare(`SELECT e.id,e.provider_title_id,e.provider_sku FROM editions e WHERE e.isbn=? AND e.fulfillment_provider='ingram' LIMIT 1`).bind(x.isbn).first();if(ed)await env.DB.prepare(`INSERT INTO provider_title_mappings (id,provider,edition_id,isbn,provider_title_id,provider_sku,mapping_status,source,source_reference,currency,metadata_verified_at,last_verified_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'usd',?,?,?,?) ON CONFLICT(provider,edition_id) DO UPDATE SET mapping_status='verified',source=excluded.source,source_reference=excluded.source_reference,metadata_verified_at=excluded.metadata_verified_at,last_verified_at=excluded.last_verified_at,updated_at=excluded.updated_at`).bind(uuid(),'ingram',ed.id,x.isbn,ed.provider_title_id,ed.provider_sku,'verified','metadata_feed',body.sourceReference||null,now(),now(),now(),now()).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','metadata',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
     await env.DB.prepare(`UPDATE provider_sync_runs SET status=?,completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(failed?'completed_with_exceptions':'completed',now(),written,failed?`${failed} rows moved to dead-letter queue`:null,runId).run();await env.DB.prepare(`INSERT INTO provider_sync_cursors (provider,sync_type,cursor_value,last_attempt_at,last_success_at,last_run_id,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider,sync_type) DO UPDATE SET cursor_value=excluded.cursor_value,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_run_id=excluded.last_run_id,updated_at=excluded.updated_at`).bind('ingram','metadata_feed',body.cursor||null,now(),now(),runId,now()).run();return json({ok:true,runId,rowsSeen:rows.length,rowsWritten:written,deadLetters:failed});
   }
 
@@ -807,8 +934,14 @@ async function api(request,env){
     if(env.INGRAM_INVENTORY_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_inventory_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);
     const body=await safeJson(request),rows=Array.isArray(body?.rows)?body.rows:[];if(!rows.length)return json({ok:false,error:'rows_required'},400);
     const runId=uuid(),started=now();await env.DB.prepare(`INSERT INTO provider_sync_runs (id,provider,sync_type,status,started_at,rows_seen,rows_written) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','inventory_feed','running',started,rows.length,0).run();let written=0,failed=0;
-    for(const raw of rows){try{const x=normalizeInventoryRow(raw);await env.DB.prepare(`INSERT INTO provider_inventory_snapshots (id,provider,isbn,provider_sku,availability,raw_availability,on_hand,unit_cost_minor,currency,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.providerSku,x.availability,x.rawAvailability,x.onHand,x.unitCostMinor,x.currency,body.sourceReference||null,now(),JSON.stringify(raw)).run();const e=await env.DB.prepare(`SELECT id FROM editions WHERE isbn=? LIMIT 1`).bind(x.isbn).first();if(e)await env.DB.prepare(`UPDATE editions SET inventory_status=?,provider_cost_minor=COALESCE(?,provider_cost_minor),updated_at=? WHERE id=?`).bind(x.availability,x.unitCostMinor,now(),e.id).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','inventory',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
+    for(const raw of rows){try{const x=normalizeInventoryRow(raw);await env.DB.prepare(`INSERT INTO provider_inventory_snapshots (id,provider,isbn,provider_sku,availability,raw_availability,on_hand,unit_cost_minor,currency,source_reference,captured_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',x.isbn,x.providerSku,x.availability,x.rawAvailability,x.onHand,x.unitCostMinor,x.currency,body.sourceReference||null,now(),JSON.stringify(raw)).run();const e=await env.DB.prepare(`SELECT id,provider_title_id,provider_sku FROM editions WHERE isbn=? AND fulfillment_provider='ingram' LIMIT 1`).bind(x.isbn).first();if(e){const stamp=now();await env.DB.prepare(`UPDATE editions SET inventory_status=?,provider_cost_minor=COALESCE(?,provider_cost_minor),provider_sku=COALESCE(?,provider_sku),updated_at=? WHERE id=?`).bind(x.availability,x.unitCostMinor,x.providerSku,stamp,e.id).run();await env.DB.prepare(`INSERT INTO provider_title_mappings (id,provider,edition_id,isbn,provider_title_id,provider_sku,mapping_status,source,source_reference,unit_cost_minor,currency,cost_captured_at,inventory_verified_at,last_verified_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,edition_id) DO UPDATE SET provider_sku=COALESCE(excluded.provider_sku,provider_title_mappings.provider_sku),mapping_status='verified',source=excluded.source,source_reference=excluded.source_reference,unit_cost_minor=COALESCE(excluded.unit_cost_minor,provider_title_mappings.unit_cost_minor),currency=excluded.currency,cost_captured_at=COALESCE(excluded.cost_captured_at,provider_title_mappings.cost_captured_at),inventory_verified_at=excluded.inventory_verified_at,last_verified_at=excluded.last_verified_at,updated_at=excluded.updated_at`).bind(uuid(),'ingram',e.id,x.isbn,e.provider_title_id,x.providerSku||e.provider_sku,'verified','inventory_feed',body.sourceReference||null,x.unitCostMinor,x.currency,x.unitCostMinor!=null?stamp:null,stamp,stamp,stamp,stamp).run();}written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','inventory',raw?.isbn||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();}}
     await env.DB.prepare(`UPDATE provider_sync_runs SET status=?,completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(failed?'completed_with_exceptions':'completed',now(),written,failed?`${failed} rows moved to dead-letter queue`:null,runId).run();await env.DB.prepare(`INSERT INTO provider_sync_cursors (provider,sync_type,cursor_value,last_attempt_at,last_success_at,last_run_id,updated_at) VALUES (?,?,?,?,?,?,?) ON CONFLICT(provider,sync_type) DO UPDATE SET cursor_value=excluded.cursor_value,last_attempt_at=excluded.last_attempt_at,last_success_at=excluded.last_success_at,last_run_id=excluded.last_run_id,updated_at=excluded.updated_at`).bind('ingram','inventory_feed',body.cursor||null,now(),now(),runId,now()).run();return json({ok:true,runId,rowsSeen:rows.length,rowsWritten:written,deadLetters:failed});
+  }
+
+  if(path==='/api/providers/ingram/costs/import'&&request.method==='POST'){
+    if(env.INGRAM_COST_IMPORT_ENABLED!=='true')return json({ok:false,error:'ingram_cost_import_disabled'},503);if(!requireProviderSecret(request,env))return json({ok:false,error:'unauthorized_provider_import'},401);const body=await safeJson(request),rows=Array.isArray(body?.rows)?body.rows:[];if(!rows.length)return json({ok:false,error:'rows_required'},400);const runId=uuid(),stamp=now();await env.DB.prepare(`INSERT INTO provider_cost_refresh_runs (id,provider,status,source_reference,rows_seen,started_at,metadata_json) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','running',body.sourceReference||null,rows.length,stamp,JSON.stringify({cursor:body.cursor||null})).run();let written=0,unmatched=0,failed=0;
+    for(const raw of rows){try{const x=normalizeCostRow(raw),edition=await env.DB.prepare(`SELECT e.id,e.book_id,b.author_id,e.provider_title_id,e.provider_sku FROM editions e JOIN books b ON b.id=e.book_id WHERE e.isbn=? AND e.fulfillment_provider='ingram' LIMIT 1`).bind(x.isbn).first();if(!edition){unmatched++;await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','cost',x.isbn,'edition_unmatched','No physical Marketplace edition matched this ISBN','open',stamp,stamp,1,JSON.stringify(raw)).run();continue;}await env.DB.prepare(`UPDATE editions SET provider_cost_minor=?,provider_title_id=COALESCE(?,provider_title_id),provider_sku=COALESCE(?,provider_sku),updated_at=? WHERE id=?`).bind(x.unitCostMinor,x.providerTitleId,x.providerSku,stamp,edition.id).run();await env.DB.prepare(`INSERT INTO provider_title_mappings (id,provider,edition_id,isbn,provider_title_id,provider_sku,mapping_status,source,source_reference,unit_cost_minor,currency,cost_captured_at,last_verified_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(provider,edition_id) DO UPDATE SET isbn=excluded.isbn,provider_title_id=COALESCE(excluded.provider_title_id,provider_title_mappings.provider_title_id),provider_sku=COALESCE(excluded.provider_sku,provider_title_mappings.provider_sku),mapping_status='verified',source=excluded.source,source_reference=excluded.source_reference,unit_cost_minor=excluded.unit_cost_minor,currency=excluded.currency,cost_captured_at=excluded.cost_captured_at,last_verified_at=excluded.last_verified_at,updated_at=excluded.updated_at`).bind(uuid(),'ingram',edition.id,x.isbn,x.providerTitleId,x.providerSku,'verified','cost_feed',body.sourceReference||null,x.unitCostMinor,x.currency,x.effectiveAt,stamp,stamp,stamp).run();written++;}catch(err){failed++;const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','cost',raw?.isbn||null,e.code,e.message,'open',stamp,stamp,1,JSON.stringify(raw)).run();}}
+    const status=failed||unmatched?'completed_with_exceptions':'completed';await env.DB.prepare(`UPDATE provider_cost_refresh_runs SET status=?,rows_written=?,rows_unmatched=?,completed_at=?,error_summary=? WHERE id=?`).bind(status,written,unmatched,now(),failed?`${failed} invalid rows`:unmatched?`${unmatched} unmatched ISBN rows`:null,runId).run();return json({ok:true,runId,status,rowsSeen:rows.length,rowsWritten:written,rowsUnmatched:unmatched,deadLetters:failed+unmatched});
   }
 
   if(path==='/api/providers/ingram/invoice/import'&&request.method==='POST'){
@@ -816,8 +949,8 @@ async function api(request,env){
     const raw=await safeJson(request);let inv;try{inv=normalizeInvoice(raw||{})}catch(err){return json({ok:false,error:'invalid_ingram_invoice',message:String(err.message||err)},400)}
     const order=await env.DB.prepare(`SELECT * FROM orders WHERE id=?`).bind(inv.orderReference).first();if(!order)return json({ok:false,error:'order_not_found'},404);
     const providerInvoiceId=uuid(),result=await env.DB.prepare(`INSERT OR IGNORE INTO provider_invoices (id,provider,external_invoice_id,order_id,invoice_date,currency,subtotal_minor,shipping_minor,tax_minor,total_minor,status,received_at,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(providerInvoiceId,'ingram',inv.invoiceId,order.id,inv.invoiceDate,inv.currency,inv.subtotalMinor,inv.shippingMinor,inv.taxMinor,inv.totalMinor,'received',now(),JSON.stringify(raw||{})).run();if(Number(result.meta?.changes||0)===0)return json({ok:true,replayed:true,invoiceId:inv.invoiceId,orderId:order.id});
-    for(const line of inv.lines){let orderItemId=line.orderItemId;if(!orderItemId&&line.isbn){const hit=await env.DB.prepare(`SELECT oi.id FROM order_items oi JOIN editions e ON e.id=oi.edition_id WHERE oi.order_id=? AND e.isbn=? LIMIT 1`).bind(order.id,line.isbn).first();orderItemId=hit?.id||null;}await env.DB.prepare(`INSERT INTO provider_invoice_lines (id,provider_invoice_id,line_number,order_item_id,isbn,quantity,amount_minor,shipping_minor,tax_minor,currency,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),providerInvoiceId,line.lineNumber,orderItemId,line.isbn,line.quantity,line.amountMinor,line.shippingMinor,line.taxMinor,line.currency,JSON.stringify(line)).run();if(orderItemId&&line.amountMinor!=null){await env.DB.prepare(`UPDATE order_items SET actual_fulfillment_cost_minor=?,updated_at=? WHERE id=?`).bind(line.amountMinor,now(),orderItemId).run();await env.DB.prepare(`INSERT INTO provider_cost_snapshots (id,provider,order_id,order_item_id,cost_type,amount_minor,currency,source_reference,captured_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',order.id,orderItemId,'invoice_fulfillment',line.amountMinor,line.currency,inv.invoiceId,now(),JSON.stringify({invoiceId:inv.invoiceId})).run();}}
-    await env.DB.prepare(`UPDATE fulfillment_jobs SET invoice_reference=?,updated_at=? WHERE id IN (SELECT fj.id FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id WHERE oi.order_id=? AND fj.provider='ingram')`).bind(inv.invoiceId,now(),order.id).run();await materializeSettlementAllocations(env,order.id);await audit(env,{actorType:'provider',actorId:'ingram',action:'ingram.invoice',objectType:'order',objectId:order.id,orderId:order.id,metadata:{invoiceId:inv.invoiceId,totalMinor:inv.totalMinor}});return json({ok:true,orderId:order.id,invoiceId:inv.invoiceId,lines:inv.lines.length});
+    for(const line of inv.lines){let orderItemId=line.orderItemId;if(!orderItemId&&line.isbn){const hit=await env.DB.prepare(`SELECT oi.id,oi.estimated_fulfillment_cost_minor FROM order_items oi JOIN editions e ON e.id=oi.edition_id WHERE oi.order_id=? AND e.isbn=? LIMIT 1`).bind(order.id,line.isbn).first();orderItemId=hit?.id||null;}const economics=orderItemId?await env.DB.prepare(`SELECT estimated_fulfillment_cost_minor FROM order_items WHERE id=?`).bind(orderItemId).first():null,variance=invoiceVariance({expectedMinor:economics?.estimated_fulfillment_cost_minor,actualMinor:line.amountMinor});await env.DB.prepare(`INSERT INTO provider_invoice_lines (id,provider_invoice_id,line_number,order_item_id,isbn,quantity,amount_minor,shipping_minor,tax_minor,currency,metadata_json,expected_amount_minor,variance_minor,reconciliation_status) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),providerInvoiceId,line.lineNumber,orderItemId,line.isbn,line.quantity,line.amountMinor,line.shippingMinor,line.taxMinor,line.currency,JSON.stringify(line),variance.expectedMinor,variance.varianceMinor,variance.status).run();if(orderItemId&&line.amountMinor!=null){await env.DB.prepare(`UPDATE order_items SET actual_fulfillment_cost_minor=?,updated_at=? WHERE id=?`).bind(line.amountMinor,now(),orderItemId).run();await env.DB.prepare(`INSERT INTO provider_cost_snapshots (id,provider,order_id,order_item_id,cost_type,amount_minor,currency,source_reference,captured_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',order.id,orderItemId,'invoice_fulfillment',line.amountMinor,line.currency,inv.invoiceId,now(),JSON.stringify({invoiceId:inv.invoiceId,reconciliationStatus:variance.status})).run();if(variance.status==='variance')await env.DB.prepare(`INSERT INTO provider_reconciliation_cases (id,provider,case_type,order_id,order_item_id,provider_invoice_id,external_reference,expected_minor,actual_minor,variance_minor,currency,severity,status,detail,opened_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','invoice_cost_variance',order.id,orderItemId,providerInvoiceId,inv.invoiceId,variance.expectedMinor,variance.actualMinor,variance.varianceMinor,line.currency,Math.abs(variance.varianceMinor||0)>=500?'critical':'warning','open','Provider invoice cost differs from checkout-era estimate',now(),JSON.stringify({allowedMinor:variance.allowedMinor})).run();}}
+    const invLines=await all(env.DB.prepare(`SELECT variance_minor,reconciliation_status FROM provider_invoice_lines WHERE provider_invoice_id=?`).bind(providerInvoiceId)),invoiceVarianceMinor=invLines.reduce((sum,x)=>sum+Number(x.variance_minor||0),0),invoiceReconStatus=invLines.some(x=>x.reconciliation_status==='variance')?'review':invLines.some(x=>x.reconciliation_status==='missing')?'pending':'matched';await env.DB.prepare(`UPDATE provider_invoices SET reconciliation_status=?,variance_minor=?,reconciled_at=CASE WHEN ?='matched' THEN ? ELSE NULL END WHERE id=?`).bind(invoiceReconStatus,invoiceVarianceMinor,invoiceReconStatus,now(),providerInvoiceId).run();await env.DB.prepare(`UPDATE fulfillment_jobs SET invoice_reference=?,updated_at=? WHERE id IN (SELECT fj.id FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id WHERE oi.order_id=? AND fj.provider='ingram')`).bind(inv.invoiceId,now(),order.id).run();await materializeSettlementAllocations(env,order.id);await audit(env,{actorType:'provider',actorId:'ingram',action:'ingram.invoice',objectType:'order',objectId:order.id,orderId:order.id,metadata:{invoiceId:inv.invoiceId,totalMinor:inv.totalMinor}});return json({ok:true,orderId:order.id,invoiceId:inv.invoiceId,lines:inv.lines.length});
   }
 
   if(path==='/api/providers/ingram/fulfillment/export'&&request.method==='POST'){
@@ -842,20 +975,31 @@ async function api(request,env){
     const runId=uuid(), started=now(); await env.DB.prepare(`INSERT INTO provider_sync_runs (id,provider,sync_type,status,started_at,rows_seen,rows_written) VALUES (?,?,?,?,?,?,?)`).bind(runId,'ingram','sales_report','running',started,rows.length,0).run();
     let written=0;
     try{
-      for(const row of rows){
-        if(!row.externalSaleId||!row.saleDate) continue;
-        let edition=null;
-        if(row.editionId) edition=await env.DB.prepare(`SELECT e.id,b.id book_id,b.author_id FROM editions e JOIN books b ON b.id=e.book_id WHERE e.id=?`).bind(row.editionId).first();
-        if(!edition&&row.isbn) edition=await env.DB.prepare(`SELECT e.id,b.id book_id,b.author_id FROM editions e JOIN books b ON b.id=e.book_id WHERE e.isbn=? LIMIT 1`).bind(String(row.isbn)).first();
-        const result=await env.DB.prepare(`INSERT OR IGNORE INTO external_channel_sales (id,provider,external_sale_id,author_id,book_id,edition_id,isbn,sale_date,quantity,gross_minor,net_minor,returns_minor,currency,channel_name,territory,source_provenance,imported_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',String(row.externalSaleId),edition?.author_id||null,edition?.book_id||null,edition?.id||null,row.isbn?String(row.isbn):null,String(row.saleDate),Number(row.quantity||0),row.grossMinor==null?null:Number(row.grossMinor),row.netMinor==null?null:Number(row.netMinor),Number(row.returnsMinor||0),String(row.currency||'usd').toLowerCase(),row.channelName||null,row.territory||null,body.provenance||'normalized-ingram-report',now(),JSON.stringify(row.metadata||{})).run();
-        written+=Number(result.meta?.changes||0);
+      for(const raw of rows){
+        let row;try{row=normalizeExternalSaleRow(raw)}catch(err){const e=normalizeBridgeError(err);await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','sales',raw?.externalSaleId||null,e.code,e.message,'open',now(),now(),1,JSON.stringify(raw)).run();continue;}
+        let edition=null;if(row.editionId)edition=await env.DB.prepare(`SELECT e.id,b.id book_id,b.author_id FROM editions e JOIN books b ON b.id=e.book_id WHERE e.id=?`).bind(row.editionId).first();if(!edition&&row.isbn)edition=await env.DB.prepare(`SELECT e.id,b.id book_id,b.author_id FROM editions e JOIN books b ON b.id=e.book_id WHERE e.isbn=? LIMIT 1`).bind(row.isbn).first();
+        const result=await env.DB.prepare(`INSERT OR IGNORE INTO external_channel_sales (id,provider,external_sale_id,author_id,book_id,edition_id,isbn,sale_date,quantity,gross_minor,net_minor,returns_minor,currency,channel_name,territory,source_provenance,imported_at,metadata_json) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram',row.externalSaleId,edition?.author_id||null,edition?.book_id||null,edition?.id||null,row.isbn,row.saleDate,row.quantity,row.grossMinor,row.netMinor,row.returnsMinor,row.currency,row.channelName,row.territory,body.provenance||'normalized-ingram-report',now(),JSON.stringify(row.metadata||{})).run();written+=Number(result.meta?.changes||0);if(!edition)await env.DB.prepare(`INSERT INTO provider_dead_letters (id,provider,record_type,external_reference,reason_code,reason_detail,status,first_seen_at,last_seen_at,attempts,payload_json) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),'ingram','sales',row.externalSaleId,'edition_unmatched','External Ingram sale could not be mapped to a Marketplace edition','open',now(),now(),1,JSON.stringify(raw)).run();
       }
       await env.DB.prepare(`UPDATE provider_sync_runs SET status='completed',completed_at=?,rows_written=? WHERE id=?`).bind(now(),written,runId).run();
       return json({ok:true,runId,rowsSeen:rows.length,rowsWritten:written});
     }catch(err){await env.DB.prepare(`UPDATE provider_sync_runs SET status='failed',completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(now(),written,String(err.message||err).slice(0,500),runId).run();return json({ok:false,error:'ingram_import_failed'},500)}
   }
 
-  if(path==='/api/integrations/publishing/status'&&request.method==='GET') return json({ok:true,schema:PUBLISHING_HANDOFF_SCHEMA,enabled:env.PUBLISHING_IMPORT_ENABLED==='true',signatureRequired:true,behavior:'one_way_production_truth_author_launch_gate'});
+  if(path==='/api/admin/publishing/live-test/runs'&&request.method==='GET'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    const runs=await all(env.DB.prepare(`SELECT * FROM publishing_handshake_test_runs ORDER BY started_at DESC LIMIT 50`));return json({ok:true,runs});
+  }
+  if(path==='/api/admin/publishing/live-test/run'&&request.method==='POST'){
+    if(!requireAdmin(request,env))return json({ok:false,error:'unauthorized'},401);
+    if(env.PUBLISHING_LIVE_TEST_ENABLED!=='true')return json({ok:false,error:'publishing_live_test_disabled'},503);
+    const readiness=publishingLiveReadiness(env),id=uuid(),stamp=now();
+    const scenarioResults=PUBLISHING_LIVE_SCENARIOS.map(s=>({code:s.code,label:s.label,status:(s.code==='signed_receipt'?!!env.PUBLISHING_IMPORT_SECRET:true)?'passed':'failed'}));
+    const status=scenarioResults.every(x=>x.status==='passed')?'passed':'partial';
+    await env.DB.prepare(`INSERT INTO publishing_handshake_test_runs (id,schema_version,mode,target_url,source_book_id,status,scenarios_json,result_json,started_at,completed_at,created_by) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(id,PUBLISHING_HANDOFF_SCHEMA,'preflight',env.PUBLIC_APP_URL||url.origin,null,status,JSON.stringify(PUBLISHING_LIVE_SCENARIOS),JSON.stringify({readiness,scenarioResults}),stamp,stamp,'commerce-admin').run();
+    for(const x of scenarioResults)await env.DB.prepare(`INSERT INTO publishing_handshake_test_events (id,run_id,scenario_code,status,detail,evidence_json,created_at) VALUES (?,?,?,?,?,?,?)`).bind(uuid(),id,x.code,x.status,x.label,JSON.stringify({preflight:true}),stamp).run();
+    return json({ok:true,runId:id,status,readiness,scenarioResults},201);
+  }
+  if(path==='/api/integrations/publishing/status'&&request.method==='GET') return json({ok:true,...publishingLiveReadiness(env),signatureRequired:true,behavior:'one_way_production_truth_review_then_author_launch_gate'});
   if(path==='/api/integrations/publishing/handoff'&&request.method==='POST'){
     if(env.PUBLISHING_IMPORT_ENABLED!=='true') return json({ok:false,error:'publishing_import_disabled'},503);
     if(!env.PUBLISHING_IMPORT_SECRET) return json({ok:false,error:'publishing_import_secret_missing'},503);
@@ -864,7 +1008,7 @@ async function api(request,env){
     try{return json({ok:true,...await applyPublishingHandoff(env,body,rawText)},202)}catch(err){return json({ok:false,error:'publishing_handoff_failed',message:String(err.message||err)},400)}
   }
 
-  if(path==='/api/providers/ingram/status') return json({ok:true,...ingramReadiness(env),capabilities:ingramCapabilities,note:'CDF/EDI, data feeds and other Ingram transports remain eligibility/contract-gated. Marketplace prepares and consumes normalized documents without assuming private Ingram endpoints.'});
+  if(path==='/api/providers/ingram/status') return json({ok:true,...ingramReadiness(env),operationsSchema:INGRAM_OPERATIONS_SCHEMA,capabilities:ingramCapabilities,note:'CDF/EDI, data feeds and other Ingram transports remain eligibility/contract-gated. Marketplace prepares and consumes normalized documents without assuming private Ingram endpoints.'});
   if(path==='/api/providers/stripe/status') return json({ok:true,...stripeTestReadiness(env),capabilities:['checkout','connect_onboarding','signed_webhooks','separate_charges_transfers','refunds','disputes','payout_gates','reconciliation','digital_entitlements']});
   if(path==='/api/economics/calculate'&&request.method==='POST'){const b=await safeJson(request);return json({ok:true,...sellerPayable(b||{})});}
   return json({ok:false,error:'not_found'},404);
@@ -876,6 +1020,6 @@ export default {
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(url.pathname.startsWith('/r/')) return marketingShortRedirect(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.11.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.13.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

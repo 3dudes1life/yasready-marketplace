@@ -18,6 +18,6 @@ const checks=[
  ['UI has preview before apply',()=>assert.ok(main.includes('LIVE PREVIEW'))],
  ['UI exposes production fields as locked',()=>assert.ok(main.includes('Production fields locked'))],
  ['catalog editor responsive styles exist',()=>assert.match(css,/\.catalogEditorBody/)],
- ['catalog version label is present',()=>assert.match(main,/v0\.11\.0/)]
+ ['catalog version label is present',()=>assert.match(main,/v0\.13\.0/)]
 ];
-let passed=0;for(const [name,fn] of checks){try{fn();passed++;console.log(`PASS: ${name}`)}catch(e){console.error(`FAIL: ${name}`);throw e}}console.log(`PASS: ${passed}/${checks.length} v0.11 Catalog Management regression checks`);
+let passed=0;for(const [name,fn] of checks){try{fn();passed++;console.log(`PASS: ${name}`)}catch(e){console.error(`FAIL: ${name}`);throw e}}console.log(`PASS: ${passed}/${checks.length} v0.13 Catalog Management regression checks`);

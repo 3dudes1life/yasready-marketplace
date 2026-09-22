@@ -4,8 +4,8 @@ const read=p=>fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
 const main=read('src/main.js'),worker=read('src/worker.mjs'),css=read('src/styles.css'),sql=read('migrations/0011_marketing_studio.sql'),engine=read('src/lib/marketing-studio.mjs');
 const pkg=JSON.parse(read('package.json'));
 const checks=[
- ['package version is 0.11.0',()=>assert.equal(pkg.version,'0.11.0')],
- ['Marketing Studio release label exists',()=>assert.match(main,/v0\.11\.0/)],
+ ['package version is 0.13.0',()=>assert.equal(pkg.version,'0.13.0')],
+ ['Marketing Studio release label exists',()=>assert.match(main,/v0\.13\.0/)],
  ['campaign builder has objective and spend',()=>{assert.match(main,/campaignObjective/);assert.match(main,/campaignBudget/)}],
  ['launch kit exists in UI',()=>assert.match(main,/LAUNCH KIT/)],
  ['campaign performance shows conversion and ROAS',()=>{assert.match(main,/Conv\./);assert.match(main,/ROAS/)}],
