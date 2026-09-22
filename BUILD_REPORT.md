@@ -1,53 +1,79 @@
-# Marketplace | YasReady v0.4.0 — Build Report
+# Marketplace | YasReady v0.5.0 — Build Report
 
 ## Result
 
-**PASS — package ready for repository upload / GitHub Pages demo.**
+**PASS — Publishing Handshake package ready for repository upload and demo.**
 
-v0.4.0 is the Ingram Bridge build. It retains v0.3 Commerce Closure and adds provider-feed, fulfillment-document, invoice, retry, dead-letter and fulfillment-health architecture. It also fixes the GitHub Pages white-screen bootstrap found on the v0.3 repository deployment.
+v0.5.0 keeps Marketplace in its own repository while adding the receiving side of a safe Publishing → Marketplace connection. Publishing remains untouched by this package.
 
 ## Verification completed
 
 - `node --check src/main.js` — PASS
-- `node --check src/lib/analytics.js` — PASS
-- `node --check src/lib/ingram-bridge.mjs` — PASS
 - `node --check src/worker.mjs` — PASS
+- `node --check src/lib/publishing-handoff.mjs` — PASS
+- `npm run verify:publishing` — **8/8 PASS**
 - `npm run verify:pages` — **7/7 PASS**
-- `npm test` — **30/30 PASS**
-- fresh SQLite migration replay — **7/7 migrations PASS**
-- fresh schema after migrations — **48 application tables**
-- HTTP static-path smoke test — index, main JS, stylesheet, demo data and analytics module all resolve at `/yasready-marketplace/`
+- `npm run verify:style` — **12/12 PASS**
+- `npm test` — **40/40 PASS**
+- fresh SQLite migration replay through Python sqlite3 — **8/8 migrations PASS**
+- fresh schema after migrations — **52 application tables**
+- Publishing provenance tables present — PASS
 
-## GitHub Pages incident fixed
 
-The v0.3 repository root used `/src/main.js`, which a GitHub project site resolves against `https://3dudes1life.github.io/` rather than `/yasready-marketplace/`. The browser was therefore not bootstrapping the app correctly. v0.4 changes the demo bootstrap to project-relative assets, moves CSS loading into HTML, guards native `import.meta.env`, lazy-loads QRCode so an optional CDN failure cannot blank the storefront, and adds a Pages deep-link fallback.
+## YasReady visual parity closure
 
-`PAGES_VERIFY.command` / `npm run verify:pages` prevents regression.
+The Marketplace no longer carries its earlier purple-first / oversized bookstore-adjacent operating UI. v0.5 now locks to the shared YasReady platform system:
 
-## Ingram Bridge additions
+- shared light/dark theme preference via `yasready-theme`
+- Ready Lime `#C6FF00` as a readiness/status signal
+- YasReady green `#16815c` as the primary operating accent
+- compact 64px platform navigation shell
+- green-gradient primary actions
+- shared panel/background/muted/line tokens in light and dark mode
+- compact operating cards and controls consistent with Business and Publishing
+- dedicated regression verification in `scripts/verify-yasready-style.mjs`
 
-- normalized readiness/capability model
-- metadata feed snapshots
-- inventory/availability + provider cost snapshots
-- provider sync cursors and run history
-- normalized purchase-order validation/envelope
-- PO acknowledgment / shipment / exception ingestion retained
-- provider invoice + invoice-line ingestion
-- fulfillment attempt ledger
-- bounded retry schedule
-- dead-letter queue
-- author fulfillment summary API
-- admin Ingram queue + dead-letter APIs
-- actual fulfillment-cost reconciliation back into Commerce Closure
-- external Ingram sales remain isolated from native Marketplace orders
+## Publishing Handshake closure
+
+The receiving architecture now proves:
+
+- same YasReady account / `userId` is the ownership key
+- source books and source editions receive durable cross-product links
+- the payload is schema-versioned and SHA-256 hashed
+- repeated identical payloads are idempotent
+- service-to-service requests require a timestamped HMAC signature
+- a Publishing source book cannot be attached to a different YasReady user
+- production-owned fields can sync forward
+- Marketplace-owned commercial fields are not silently overwritten
+- changed Publishing price suggestions are recorded as preserved Marketplace values
+- imports create/update drafts only
+- author readiness and explicit go-live are separate actions
+- every launch attempt can be audited
+
+## New operational surfaces
+
+- `POST /api/integrations/publishing/handoff`
+- `GET /api/integrations/publishing/status`
+- `GET /api/me/publishing/imports`
+- `GET /api/me/publishing/changes?bookId=...`
+- `GET /api/me/books/:bookId/readiness`
+- `POST /api/me/books/:bookId/go-live`
+- `POST /api/me/books/:bookId/pause`
+- Launch workspace in the author UI
+- `examples/publishing-handoff.example.json`
+- `scripts/sign-publishing-handoff.mjs`
+- `scripts/verify-publishing.mjs`
+- `PUBLISHING_HANDSHAKE_VERIFY.command`
 
 ## Safety
 
-Every Ingram action remains fail-closed by default. In particular, `INGRAM_SUBMISSION_ENABLED=false`; this build does **not** invent or call an undocumented/private Ingram API.
+`PUBLISHING_IMPORT_ENABLED=false` remains the tracked default and a configured `PUBLISHING_IMPORT_SECRET` is required even after the feature gate is enabled. The handoff cannot directly make a listing live.
+
+All Stripe and Ingram live actions remain fail-closed as in prior builds.
 
 ## Production bundle limitation in this environment
 
-`npm run build` could not execute because `vite` is not installed locally. `npm install` was attempted earlier in this environment and timed out downloading dependencies. Therefore the Vite production bundle is **not claimed as verified here**. Source syntax, engine tests, Pages checks, migration replay and static-path checks are verified.
+`npm run build` could not execute because `vite` is not installed in this runtime (`node_modules` is absent). Therefore the Vite production bundle is **not claimed as verified here**. Source syntax, engine tests, Pages checks, Publishing Handshake verification and full migration replay are verified.
 
 Run locally after dependency installation:
 

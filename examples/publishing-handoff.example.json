@@ -1,0 +1,66 @@
+{
+  "schema": "yasready.publishing.marketplace.v1",
+  "userId": "demo-user-william",
+  "sourceBookId": "publishing-demo-book-2",
+  "sourceRevision": "book2-production-2026-09-21",
+  "sentAt": "2026-09-21T18:45:00-07:00",
+  "author": {
+    "displayName": "William T. Zakrajshek",
+    "email": "demo@yasready.local"
+  },
+  "book": {
+    "title": "Fault Lines",
+    "subtitle": "Tres Amigos, Una Vida — Book Two",
+    "description": "Love survives the easy moments. Fault Lines asks what happens when the ground underneath all three of them begins to move.",
+    "longDescription": "Book Two pushes the relationship into sharper territory: distance, family, fear, repair, and whether choosing each other is enough when everything around them changes.",
+    "coverUrl": "https://example.invalid/fault-lines-cover.jpg",
+    "primaryCategory": "LGBTQ+ Romance",
+    "suggestedSlug": "fault-lines"
+  },
+  "editions": [
+    {
+      "sourceEditionId": "publishing-book2-ebook",
+      "format": "ebook",
+      "isbn": "9780000000011",
+      "currency": "usd",
+      "suggestedPriceMinor": 599,
+      "fulfillmentProvider": "yasready-digital",
+      "productionStatus": "ready",
+      "artifactRef": "publishing://book2/ebook/final.epub",
+      "artifactHash": "example-ebook-hash"
+    },
+    {
+      "sourceEditionId": "publishing-book2-paperback",
+      "format": "paperback",
+      "isbn": "9780000000012",
+      "currency": "usd",
+      "suggestedPriceMinor": 1799,
+      "fulfillmentProvider": "ingram",
+      "productionStatus": "ready",
+      "providerTitleId": null,
+      "artifactRef": "publishing://book2/paperback/interior.pdf",
+      "artifactHash": "example-paperback-hash"
+    },
+    {
+      "sourceEditionId": "publishing-book2-hardcover",
+      "format": "hardcover",
+      "isbn": "9780000000013",
+      "currency": "usd",
+      "suggestedPriceMinor": 2599,
+      "fulfillmentProvider": "ingram",
+      "productionStatus": "ready",
+      "artifactRef": "publishing://book2/hardcover/interior.pdf",
+      "artifactHash": "example-hardcover-hash"
+    },
+    {
+      "sourceEditionId": "publishing-book2-audio",
+      "format": "audiobook",
+      "currency": "usd",
+      "suggestedPriceMinor": 999,
+      "fulfillmentProvider": "yasready-digital",
+      "productionStatus": "preparing",
+      "artifactRef": null,
+      "artifactHash": null
+    }
+  ]
+}

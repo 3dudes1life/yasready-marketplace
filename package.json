@@ -1,9 +1,9 @@
 {
   "name": "yasready-marketplace",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "type": "module",
-  "description": "Marketplace | YasReady v0.4.0 \u2014 Ingram Bridge with provider-feed ingestion, fulfillment document lifecycle, reconciliation, retry/dead-letter operations and GitHub Pages-safe demo deployment.",
+  "description": "Marketplace | YasReady v0.5.0 \u2014 Publishing Handshake with signed one-way imports, shared-account ownership, provenance-preserving sync, launch readiness and explicit author go-live approval.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
@@ -16,7 +16,9 @@
     "db:migrate:remote": "wrangler d1 migrations apply yasready-marketplace --remote",
     "verify:commerce": "bash COMMERCE_PRO_VERIFY.command",
     "verify:pages": "node scripts/verify-pages.mjs",
-    "verify:ingram": "node --test tests/foundation.test.mjs"
+    "verify:ingram": "node --test tests/foundation.test.mjs",
+    "verify:publishing": "node scripts/verify-publishing.mjs",
+    "verify:style": "node scripts/verify-yasready-style.mjs"
   },
   "dependencies": {
     "qrcode": "^1.5.4"

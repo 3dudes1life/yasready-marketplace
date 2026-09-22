@@ -9,6 +9,7 @@ import {createExpressAccount,createAccountLink,retrieveAccount,createCheckoutSes
 import {allocateRefund,sellerBalance,refundStatus,commerceReadiness,prorateMinor,allocateProRata} from './lib/commerce.mjs';
 import {recordOrderStatus,openCommerceException,ensureReceiptToken,materializeSettlementAllocations,createFulfillmentJobs,refreshOrderFulfillment,listAuthorOrders,getAuthorOrder,commerceHealth,audit} from './lib/commerce-ops.mjs';
 import {processStripeEvent,stripeCommerceSummary} from './lib/stripe-commerce.mjs';
+import {PUBLISHING_HANDOFF_SCHEMA,normalizePublishingHandoff,sha256Hex,computePublishingDiff,readinessForSale,verifyPublishingSignature,slugify} from './lib/publishing-handoff.mjs';
 
 const json=(data,status=200,headers={})=>new Response(JSON.stringify(data,null,2),{status,headers:{'content-type':'application/json;charset=utf-8','cache-control':'no-store',...headers}});
 const safeJson=async request=>{try{return await request.json()}catch{return null}};
@@ -73,7 +74,7 @@ function catalogFromRows(rows){
       id:r.book_id,slug:r.slug,title:r.title,subtitle:r.subtitle,description:r.description,longDescription:r.long_description,coverUrl:r.cover_url,category:r.primary_category,
       author:{id:r.author_id,name:r.author_name,handle:r.author_handle,avatarUrl:r.author_avatar_url},listing:{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at},editions:[]
     });
-    if(r.edition_id) books.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor});
+    if(r.edition_id) books.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor,publishingSourceEditionId:r.publishing_source_edition_id,productionStatus:r.production_status,artifactRef:r.artifact_ref,artifactHash:r.artifact_hash,productionSyncedAt:r.production_synced_at});
   }
   return [...books.values()];
 }
@@ -93,14 +94,14 @@ async function getCatalog(env,slug=null){
 }
 
 async function getAuthorBooks(env,authorId){
-  const rows=await all(env.DB.prepare(`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.cover_url,b.primary_category,b.status book_status,b.publishing_source_id,
-    l.id listing_id,l.status listing_status,l.visibility,l.published_at,
-    e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor
+  const rows=await all(env.DB.prepare(`SELECT b.id book_id,b.slug,b.title,b.subtitle,b.description,b.cover_url,b.primary_category,b.status book_status,b.publishing_source_id,b.source_revision,b.production_sync_status,b.production_synced_at,
+    l.id listing_id,l.status listing_status,l.visibility,l.published_at,l.author_approved_at,l.last_readiness_check_at,
+    e.id edition_id,e.format,e.isbn,e.currency,e.price_minor,e.status edition_status,e.fulfillment_provider,e.inventory_status,e.provider_purchase_url,e.provider_cost_minor,e.publishing_source_edition_id,e.production_status,e.artifact_ref,e.artifact_hash,e.production_synced_at
     FROM books b LEFT JOIN listings l ON l.book_id=b.id LEFT JOIN editions e ON e.book_id=b.id WHERE b.author_id=? ORDER BY b.updated_at DESC,e.format`).bind(authorId));
   const grouped=new Map();
   for(const r of rows){
-    if(!grouped.has(r.book_id)) grouped.set(r.book_id,{id:r.book_id,slug:r.slug,title:r.title,subtitle:r.subtitle,description:r.description,coverUrl:r.cover_url,category:r.primary_category,status:r.book_status,publishingSourceId:r.publishing_source_id,listing:r.listing_id?{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at}:null,editions:[]});
-    if(r.edition_id) grouped.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor});
+    if(!grouped.has(r.book_id)) grouped.set(r.book_id,{id:r.book_id,slug:r.slug,title:r.title,subtitle:r.subtitle,description:r.description,coverUrl:r.cover_url,category:r.primary_category,status:r.book_status,publishingSourceId:r.publishing_source_id,sourceRevision:r.source_revision,productionSyncStatus:r.production_sync_status,productionSyncedAt:r.production_synced_at,listing:r.listing_id?{id:r.listing_id,status:r.listing_status,visibility:r.visibility,publishedAt:r.published_at,authorApprovedAt:r.author_approved_at,lastReadinessCheckAt:r.last_readiness_check_at}:null,editions:[]});
+    if(r.edition_id) grouped.get(r.book_id).editions.push({id:r.edition_id,format:r.format,isbn:r.isbn,currency:r.currency,priceMinor:r.price_minor,status:r.edition_status,fulfillmentProvider:r.fulfillment_provider,inventoryStatus:r.inventory_status,providerPurchaseUrl:r.provider_purchase_url,providerCostMinor:r.provider_cost_minor,publishingSourceEditionId:r.publishing_source_edition_id,productionStatus:r.production_status,artifactRef:r.artifact_ref,artifactHash:r.artifact_hash,productionSyncedAt:r.production_synced_at});
   }
   return [...grouped.values()];
 }
@@ -180,9 +181,87 @@ async function commerceSummary(env,authorId){
   return sellerBalance({earnedMinor:earned?.earned,refundedMinor:earned?.refunded,adjustmentsMinor:earned?.adjustments,transferredMinor:transfers?.transferred,reversedMinor:transfers?.reversed});
 }
 
+async function uniqueBookSlug(env,base,excludeBookId=null){
+  const root=slugify(base); let candidate=root, n=2;
+  while(true){
+    const row=excludeBookId?await env.DB.prepare(`SELECT id FROM books WHERE slug=? AND id<>?`).bind(candidate,excludeBookId).first():await env.DB.prepare(`SELECT id FROM books WHERE slug=?`).bind(candidate).first();
+    if(!row) return candidate; candidate=`${root}-${n++}`;
+  }
+}
+
+async function ensurePublishingAuthor(env,incoming){
+  let author=await env.DB.prepare(`SELECT * FROM authors WHERE user_id=? LIMIT 1`).bind(incoming.userId).first();
+  if(author) return author;
+  const id=uuid(),handle=`author-${id.slice(0,8)}`;
+  await env.DB.prepare(`INSERT INTO authors (id,user_id,display_name,email,handle,marketplace_status,last_seen_at) VALUES (?,?,?,?,?,?,?)`).bind(id,incoming.userId,incoming.author.displayName,incoming.author.email,handle,'active',now()).run();
+  return env.DB.prepare(`SELECT * FROM authors WHERE id=?`).bind(id).first();
+}
+
+async function applyPublishingHandoff(env,raw,rawText){
+  const incoming=normalizePublishingHandoff(raw),payloadHash=await sha256Hex(rawText||raw),receivedAt=now();
+  const replay=await env.DB.prepare(`SELECT * FROM publishing_imports WHERE publishing_source_id=? AND payload_hash=? LIMIT 1`).bind(incoming.sourceBookId,payloadHash).first();
+  if(replay) return {replayed:true,importId:replay.id,bookId:replay.book_id||null,status:replay.status,disposition:replay.disposition||'duplicate'};
+  const author=await ensurePublishingAuthor(env,incoming);
+  let link=await env.DB.prepare(`SELECT * FROM publishing_book_links WHERE publishing_source_id=? LIMIT 1`).bind(incoming.sourceBookId).first();
+  if(link&&link.user_id!==incoming.userId) throw new Error('publishing_source_owned_by_different_user');
+  const importId=uuid();
+  await env.DB.prepare(`INSERT INTO publishing_imports (id,user_id,publishing_source_id,schema_version,payload_hash,status,received_at,source_revision,disposition,latest_received_at) VALUES (?,?,?,?,?,?,?,?,?,?)`).bind(importId,incoming.userId,incoming.sourceBookId,incoming.schema,payloadHash,'received',receivedAt,incoming.sourceRevision,'pending',receivedAt).run();
+  try{
+    let book,created=false;
+    if(!link){
+      const legacy=await env.DB.prepare(`SELECT * FROM books WHERE publishing_source_id=? AND author_id=? LIMIT 1`).bind(incoming.sourceBookId,author.id).first();
+      if(legacy){const linkId=uuid();await env.DB.prepare(`INSERT INTO publishing_book_links (id,user_id,author_id,book_id,publishing_source_id,source_schema_version,source_revision,latest_payload_hash,production_status,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(linkId,incoming.userId,author.id,legacy.id,incoming.sourceBookId,incoming.schema,incoming.sourceRevision,payloadHash,'linked_existing',receivedAt,null,receivedAt,receivedAt).run();link=await env.DB.prepare(`SELECT * FROM publishing_book_links WHERE id=?`).bind(linkId).first();}
+    }
+    if(!link){
+      const bookId=uuid(),slug=await uniqueBookSlug(env,incoming.book.suggestedSlug||incoming.book.title);
+      await env.DB.prepare(`INSERT INTO books (id,author_id,publishing_source_id,slug,title,subtitle,description,long_description,cover_url,primary_category,status,source_revision,production_sync_status,production_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(bookId,author.id,incoming.sourceBookId,slug,incoming.book.title,incoming.book.subtitle,incoming.book.description,incoming.book.longDescription,incoming.book.coverUrl,incoming.book.primaryCategory,'draft',incoming.sourceRevision,'synced',receivedAt,receivedAt,receivedAt).run();
+      await env.DB.prepare(`INSERT INTO listings (id,book_id,status,visibility,created_at,updated_at) VALUES (?,?,?,?,?,?)`).bind(uuid(),bookId,'draft','public',receivedAt,receivedAt).run();
+      const linkId=uuid();
+      await env.DB.prepare(`INSERT INTO publishing_book_links (id,user_id,author_id,book_id,publishing_source_id,source_schema_version,source_revision,latest_payload_hash,production_status,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(linkId,incoming.userId,author.id,bookId,incoming.sourceBookId,incoming.schema,incoming.sourceRevision,payloadHash,'synced',receivedAt,receivedAt,receivedAt,receivedAt).run();
+      link=await env.DB.prepare(`SELECT * FROM publishing_book_links WHERE id=?`).bind(linkId).first(); created=true;
+      for(const e of incoming.editions){
+        const editionId=uuid();
+        await env.DB.prepare(`INSERT INTO editions (id,book_id,format,isbn,currency,price_minor,status,fulfillment_provider,provider_title_id,provider_sku,inventory_status,publishing_source_edition_id,production_status,artifact_ref,artifact_hash,production_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(editionId,bookId,e.format,e.isbn,e.currency,e.suggestedPriceMinor||0,'draft',e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.format==='ebook'||e.format==='audiobook'?'available':'unknown',e.sourceEditionId,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt).run();
+        await env.DB.prepare(`INSERT INTO publishing_edition_links (id,publishing_book_link_id,edition_id,publishing_source_edition_id,source_revision,production_status,artifact_ref,artifact_hash,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),link.id,editionId,e.sourceEditionId,incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,receivedAt).run();
+      }
+      book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(bookId).first();
+    } else {
+      book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(link.book_id).first(); if(!book) throw new Error('linked_book_missing');
+      if(book.author_id!==author.id) throw new Error('publishing_author_mapping_conflict');
+      const currentEditions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=?`).bind(book.id));
+      const changes=computePublishingDiff({currentBook:book,currentEditions,incoming});
+      await env.DB.prepare(`UPDATE books SET title=?,subtitle=?,description=?,long_description=?,cover_url=?,primary_category=?,source_revision=?,production_sync_status='synced',production_synced_at=?,updated_at=? WHERE id=?`).bind(incoming.book.title,incoming.book.subtitle,incoming.book.description,incoming.book.longDescription,incoming.book.coverUrl,incoming.book.primaryCategory,incoming.sourceRevision,receivedAt,receivedAt,book.id).run();
+      const currentBySource=new Map(currentEditions.map(e=>[e.publishing_source_edition_id,e]));
+      for(const e of incoming.editions){
+        const cur=currentBySource.get(e.sourceEditionId);
+        if(cur){
+          await env.DB.prepare(`UPDATE editions SET format=?,isbn=?,fulfillment_provider=?,provider_title_id=?,provider_sku=?,production_status=?,artifact_ref=?,artifact_hash=?,production_synced_at=?,updated_at=? WHERE id=?`).bind(e.format,e.isbn,e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,cur.id).run();
+          await env.DB.prepare(`UPDATE publishing_edition_links SET source_revision=?,production_status=?,artifact_ref=?,artifact_hash=?,last_received_at=?,last_applied_at=?,updated_at=? WHERE publishing_source_edition_id=?`).bind(incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,e.sourceEditionId).run();
+        } else {
+          const editionId=uuid();
+          await env.DB.prepare(`INSERT INTO editions (id,book_id,format,isbn,currency,price_minor,status,fulfillment_provider,provider_title_id,provider_sku,inventory_status,publishing_source_edition_id,production_status,artifact_ref,artifact_hash,production_synced_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`).bind(editionId,book.id,e.format,e.isbn,e.currency,e.suggestedPriceMinor||0,'draft',e.fulfillmentProvider,e.providerTitleId,e.providerSku,e.format==='ebook'||e.format==='audiobook'?'available':'unknown',e.sourceEditionId,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt).run();
+          await env.DB.prepare(`INSERT INTO publishing_edition_links (id,publishing_book_link_id,edition_id,publishing_source_edition_id,source_revision,production_status,artifact_ref,artifact_hash,last_received_at,last_applied_at,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),link.id,editionId,e.sourceEditionId,incoming.sourceRevision,e.productionStatus,e.artifactRef,e.artifactHash,receivedAt,receivedAt,receivedAt,receivedAt).run();
+        }
+      }
+      for(const c of changes){const ed=c.sourceEditionId?await env.DB.prepare(`SELECT id FROM editions WHERE publishing_source_edition_id=?`).bind(c.sourceEditionId).first():null;await env.DB.prepare(`INSERT INTO publishing_sync_changes (id,import_id,book_id,edition_id,entity_type,field_name,ownership,old_value_json,incoming_value_json,disposition,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`).bind(uuid(),importId,book.id,ed?.id||null,c.entityType,c.fieldName,c.ownership,JSON.stringify(c.oldValue),JSON.stringify(c.incomingValue),c.disposition,receivedAt).run();}
+      await env.DB.prepare(`UPDATE publishing_book_links SET source_schema_version=?,source_revision=?,latest_payload_hash=?,production_status='synced',last_received_at=?,last_applied_at=?,updated_at=? WHERE id=?`).bind(incoming.schema,incoming.sourceRevision,payloadHash,receivedAt,receivedAt,receivedAt,link.id).run();
+      book=await env.DB.prepare(`SELECT * FROM books WHERE id=?`).bind(book.id).first();
+    }
+    await env.DB.prepare(`UPDATE publishing_imports SET status='applied',applied_at=?,book_id=?,disposition=?,latest_received_at=? WHERE id=?`).bind(receivedAt,book.id,created?'created_draft':'synced_production_fields',receivedAt,importId).run();
+    await audit(env,{actorType:'service',actorId:'publishing',action:created?'publishing.book_received':'publishing.book_synced',objectType:'book',objectId:book.id,metadata:{sourceBookId:incoming.sourceBookId,sourceRevision:incoming.sourceRevision,payloadHash}});
+    return {replayed:false,importId,bookId:book.id,created,status:'applied',disposition:created?'created_draft':'synced_production_fields'};
+  }catch(err){await env.DB.prepare(`UPDATE publishing_imports SET status='failed',error_summary=?,disposition='rejected',latest_received_at=? WHERE id=?`).bind(String(err.message||err).slice(0,500),receivedAt,importId).run();throw err;}
+}
+
+async function authorBookReadiness(env,author,bookId){
+  const book=await env.DB.prepare(`SELECT * FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first(); if(!book) return null;
+  const listing=await env.DB.prepare(`SELECT * FROM listings WHERE book_id=?`).bind(bookId).first(); const editions=await all(env.DB.prepare(`SELECT * FROM editions WHERE book_id=? ORDER BY format`).bind(bookId));
+  return {book,listing,editions,readiness:readinessForSale({book,listing,editions,author})};
+}
+
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.4.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.5.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -295,6 +374,39 @@ async function api(request,env){
     if(path==='/api/me/fulfillment'&&request.method==='GET'){
       const rows=await all(env.DB.prepare(`SELECT fj.*,o.id order_id,b.title,e.format,e.isbn FROM fulfillment_jobs fj JOIN order_items oi ON oi.id=fj.order_item_id JOIN orders o ON o.id=oi.order_id JOIN editions e ON e.id=oi.edition_id JOIN books b ON b.id=e.book_id WHERE oi.author_id=? ORDER BY fj.created_at DESC LIMIT 100`).bind(author.id));
       return json({ok:true,jobs:rows});
+    }
+    if(path==='/api/me/publishing/imports'&&request.method==='GET'){
+      const imports=await all(env.DB.prepare(`SELECT pi.id,pi.publishing_source_id,pi.schema_version,pi.source_revision,pi.payload_hash,pi.status,pi.disposition,pi.received_at,pi.applied_at,pi.error_summary,pi.book_id,b.title FROM publishing_imports pi LEFT JOIN books b ON b.id=pi.book_id WHERE pi.user_id=? ORDER BY pi.received_at DESC LIMIT 100`).bind(auth.identity.userId));
+      const links=await all(env.DB.prepare(`SELECT pbl.*,b.title,b.slug,l.status listing_status,l.visibility FROM publishing_book_links pbl JOIN books b ON b.id=pbl.book_id LEFT JOIN listings l ON l.book_id=b.id WHERE pbl.user_id=? ORDER BY pbl.updated_at DESC`).bind(auth.identity.userId));
+      return json({ok:true,schema:PUBLISHING_HANDOFF_SCHEMA,imports,links});
+    }
+    if(path==='/api/me/publishing/changes'&&request.method==='GET'){
+      const bookId=url.searchParams.get('bookId'); if(!bookId)return json({ok:false,error:'book_id_required'},400);
+      const book=await env.DB.prepare(`SELECT id FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return json({ok:false,error:'book_not_owned'},404);
+      const changes=await all(env.DB.prepare(`SELECT psc.*,pi.source_revision,pi.received_at FROM publishing_sync_changes psc JOIN publishing_imports pi ON pi.id=psc.import_id WHERE psc.book_id=? ORDER BY psc.created_at DESC LIMIT 250`).bind(bookId));
+      return json({ok:true,bookId,changes});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/readiness$/)&&request.method==='GET'){
+      const bookId=decodeURIComponent(path.split('/')[4]),out=await authorBookReadiness(env,author,bookId); if(!out)return json({ok:false,error:'book_not_owned'},404);
+      await env.DB.prepare(`UPDATE listings SET last_readiness_check_at=?,updated_at=? WHERE book_id=?`).bind(now(),now(),bookId).run();
+      return json({ok:true,book:{id:out.book.id,title:out.book.title,slug:out.book.slug,productionSyncStatus:out.book.production_sync_status},listing:{status:out.listing?.status||'draft',visibility:out.listing?.visibility||'public'},editions:out.editions.map(e=>({id:e.id,format:e.format,isbn:e.isbn,priceMinor:e.price_minor,status:e.status,productionStatus:e.production_status,artifactRef:e.artifact_ref,fulfillmentProvider:e.fulfillment_provider})),readiness:out.readiness});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/go-live$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]),owned=await authorBookReadiness(env,author,bookId); if(!owned)return json({ok:false,error:'book_not_owned'},404);
+      const body=await safeJson(request)||{},selected=new Set(Array.isArray(body.editionIds)?body.editionIds:owned.readiness.eligibleEditionIds),prices=body.prices||{};
+      for(const e of owned.editions){if(selected.has(e.id)&&prices[e.id]!=null){const price=Number(prices[e.id]);if(!Number.isInteger(price)||price<=0)return json({ok:false,error:'invalid_price',editionId:e.id},400);await env.DB.prepare(`UPDATE editions SET price_minor=?,updated_at=? WHERE id=? AND book_id=?`).bind(price,now(),e.id,bookId).run();}}
+      const refreshed=await authorBookReadiness(env,author,bookId),selectedEditions=refreshed.editions.filter(e=>selected.has(e.id)),check=readinessForSale({book:refreshed.book,listing:refreshed.listing,editions:selectedEditions,author});
+      await env.DB.prepare(`INSERT INTO marketplace_launch_events (id,author_id,book_id,action,readiness_json,selected_edition_ids_json,created_at) VALUES (?,?,?,?,?,?,?)`).bind(uuid(),author.id,bookId,check.ready?'go_live':'go_live_blocked',JSON.stringify(check),JSON.stringify([...selected]),now()).run();
+      if(!check.ready)return json({ok:false,error:'book_not_ready',readiness:check},409);
+      const stamps=now();await env.DB.prepare(`UPDATE editions SET status=CASE WHEN id IN (${[...selected].map(()=>'?').join(',')}) THEN 'live' ELSE status END,updated_at=? WHERE book_id=?`).bind(...selected,stamps,bookId).run();
+      await env.DB.prepare(`UPDATE listings SET status='live',author_approved_at=COALESCE(author_approved_at,?),published_at=COALESCE(published_at,?),last_readiness_check_at=?,updated_at=? WHERE book_id=?`).bind(stamps,stamps,stamps,stamps,bookId).run();
+      await env.DB.prepare(`UPDATE books SET status='live',marketplace_ready_at=COALESCE(marketplace_ready_at,?),updated_at=? WHERE id=?`).bind(stamps,stamps,bookId).run();
+      await audit(env,{actorType:'author',actorId:author.id,action:'marketplace.book_go_live',objectType:'book',objectId:bookId,metadata:{editionIds:[...selected]}});
+      return json({ok:true,bookId,status:'live',editionIds:[...selected],readiness:check});
+    }
+    if(path.match(/^\/api\/me\/books\/[^/]+\/pause$/)&&request.method==='POST'){
+      const bookId=decodeURIComponent(path.split('/')[4]),book=await env.DB.prepare(`SELECT id FROM books WHERE id=? AND author_id=?`).bind(bookId,author.id).first();if(!book)return json({ok:false,error:'book_not_owned'},404);
+      await env.DB.batch([env.DB.prepare(`UPDATE listings SET status='paused',updated_at=? WHERE book_id=?`).bind(now(),bookId),env.DB.prepare(`UPDATE books SET status='paused',updated_at=? WHERE id=?`).bind(now(),bookId)]);await audit(env,{actorType:'author',actorId:author.id,action:'marketplace.book_paused',objectType:'book',objectId:bookId});return json({ok:true,bookId,status:'paused'});
     }
     return json({ok:false,error:'me_route_not_found'},404);
   }
@@ -433,6 +545,15 @@ async function api(request,env){
     }catch(err){await env.DB.prepare(`UPDATE provider_sync_runs SET status='failed',completed_at=?,rows_written=?,error_summary=? WHERE id=?`).bind(now(),written,String(err.message||err).slice(0,500),runId).run();return json({ok:false,error:'ingram_import_failed'},500)}
   }
 
+  if(path==='/api/integrations/publishing/status'&&request.method==='GET') return json({ok:true,schema:PUBLISHING_HANDOFF_SCHEMA,enabled:env.PUBLISHING_IMPORT_ENABLED==='true',signatureRequired:true,behavior:'one_way_production_truth_author_launch_gate'});
+  if(path==='/api/integrations/publishing/handoff'&&request.method==='POST'){
+    if(env.PUBLISHING_IMPORT_ENABLED!=='true') return json({ok:false,error:'publishing_import_disabled'},503);
+    if(!env.PUBLISHING_IMPORT_SECRET) return json({ok:false,error:'publishing_import_secret_missing'},503);
+    const rawText=await request.text(),signature=request.headers.get('x-yasready-publishing-signature')||''; if(!await verifyPublishingSignature(rawText,signature,env.PUBLISHING_IMPORT_SECRET)) return json({ok:false,error:'invalid_publishing_signature'},401);
+    let body;try{body=JSON.parse(rawText)}catch{return json({ok:false,error:'invalid_json'},400)}
+    try{return json({ok:true,...await applyPublishingHandoff(env,body,rawText)},202)}catch(err){return json({ok:false,error:'publishing_handoff_failed',message:String(err.message||err)},400)}
+  }
+
   if(path==='/api/providers/ingram/status') return json({ok:true,...ingramReadiness(env),capabilities:ingramCapabilities,note:'CDF/EDI, data feeds and other Ingram transports remain eligibility/contract-gated. Marketplace prepares and consumes normalized documents without assuming private Ingram endpoints.'});
   if(path==='/api/providers/stripe/status') return json({ok:true,mode:env.STRIPE_MODE||'off',checkoutEnabled:env.CHECKOUT_ENABLED==='true',capabilities:['checkout','connect_onboarding','signed_webhooks','separate_charges_transfers','refunds','disputes','payout_gates','reconciliation']});
   if(path==='/api/economics/calculate'&&request.method==='POST'){const b=await safeJson(request);return json({ok:true,...sellerPayable(b||{})});}
@@ -444,6 +565,6 @@ export default {
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.4.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.5.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

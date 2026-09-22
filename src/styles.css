@@ -13,3 +13,104 @@ footer{border-top:1px solid #dddde2;background:#fff;padding:24px 0;margin-top:40
 @media(max-width:780px){.shell{width:min(100% - 26px,1180px)}.nav{height:64px}.brandName small{display:none}.navlinks{display:none}.modeStrip .shell{height:29px}.modeStrip .shell>span:first-child{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.heroGrid{display:block;min-height:auto;padding:70px 0}.heroCopy h1{font-size:48px}.heroStack{height:300px;margin-top:35px}.stackBook{width:150px}.stackBook.s0{left:9%}.stackBook.s1{left:35%}.stackBook.s2{left:57%}.section{padding:55px 0}.sectionHead,.pageHead{display:block}.pageActions{margin-top:18px}.sectionHead h2{font-size:32px}.sectionHead>p{margin-top:10px}.searchRow{display:block}.filters{margin-top:10px}.bookGrid{grid-template-columns:1fr}.pitchCard{padding:30px}.pitchFlow{flex-wrap:wrap}.pageHead h1{font-size:39px}.accountBanner{grid-template-columns:auto 1fr}.accountStatus{grid-column:1/-1;width:max-content}.metricsGrid,.metricsGrid.five{grid-template-columns:repeat(2,1fr)}.twoCol,.salesLayout,.marketingGrid,.marketingGrid.second,.dataContract{grid-template-columns:1fr}.systemFlow{grid-template-columns:1fr}.systemFlow>i{transform:rotate(90deg);justify-self:center}.manageBook{grid-template-columns:1fr}.manageCover{display:none}.editionRow>div:last-child{grid-template-columns:auto 60px}.editionRow>div:last-child small{display:none}.integrationGrid{grid-template-columns:1fr}.safetyGrid{grid-template-columns:repeat(2,1fr)}.toolGrid{grid-template-columns:repeat(2,1fr)}.bookModal{grid-template-columns:1fr;max-width:560px}.modalCover{display:none}.modalBody{padding:30px 22px}.sourceTable{overflow:auto}.sourceHead,.sourceRow{min-width:520px}.campaignTable{overflow:auto}.campaignHead,.campaignRow{min-width:520px}footer .shell{display:grid;gap:10px}}
 @media(max-width:480px){.heroCopy h1{font-size:41px}.heroProof{display:grid;gap:8px}.heroActions{display:grid}.stackBook{width:125px}.stackNote{font-size:10px}.metricsGrid,.metricsGrid.five{grid-template-columns:1fr 1fr}.metricCard{padding:16px}.metricCard strong{font-size:26px}.pageHead h1{font-size:34px}.formGrid{grid-template-columns:1fr}.safetyGrid,.toolGrid{grid-template-columns:1fr}.editionRow{display:grid}.editionRow>div:last-child{justify-items:start;text-align:left;grid-template-columns:auto auto}.modalBody h1{font-size:32px}}
 .channelLane{margin-top:16px;background:linear-gradient(110deg,#1d1d1f,#29282f);color:#fff;border-radius:24px;padding:25px;display:grid;grid-template-columns:1fr auto;gap:28px;align-items:center}.channelLane h3{font-size:20px;letter-spacing:-.035em;margin:4px 0 6px}.channelLane p{font-size:10px;line-height:1.55;color:#aaaab2;max-width:680px;margin:0}.channelState{border:1px solid #48484e;border-radius:16px;padding:14px 16px;min-width:220px}.channelState span,.channelState strong,.channelState small{display:block}.channelState span{color:#dfff78;font-size:8px;font-weight:900;text-transform:uppercase;letter-spacing:.08em}.channelState strong{font-size:11px;margin:5px 0}.channelState small{font-size:8px;color:#9999a1;line-height:1.4}@media(max-width:780px){.channelLane{grid-template-columns:1fr}.channelState{min-width:0}}
+
+/* ========================================================================== */
+/* v0.5.0 — EXACT YASREADY PLATFORM VISUAL PARITY                            */
+/* Mirrors the shared Business/Publishing visual contract: compact Apple-like */
+/* surfaces, YasReady green operating accent, Ready Lime signal, dark parity. */
+/* ========================================================================== */
+:root,
+:root[data-theme="light"]{
+  --yr-brand:#C6FF00;
+  --yr-green:#16815c;
+  --yr-green-2:#25a36f;
+  --yr-green-soft:#e7f5ee;
+  --yr-bg:#f4f5f8;
+  --yr-panel:#ffffff;
+  --yr-panel2:#f0f2f6;
+  --yr-text:#141720;
+  --yr-muted:#686f7c;
+  --yr-line:rgba(20,24,34,.12);
+  --yr-shadow:0 20px 60px rgba(30,34,45,.07);
+  --yr-shadow-strong:0 26px 80px rgba(30,34,45,.10);
+  --ink:var(--yr-text);
+  --muted:var(--yr-muted);
+  --line:var(--yr-line);
+  --surface:var(--yr-panel);
+  --soft:var(--yr-bg);
+  --purple:var(--yr-green);
+  --lime:var(--yr-brand);
+  --shadow:var(--yr-shadow);
+  color-scheme:light;
+}
+:root[data-theme="dark"]{
+  --yr-brand:#C6FF00;
+  --yr-bg:#07090e;
+  --yr-panel:#10141c;
+  --yr-panel2:#151a24;
+  --yr-text:#f7f8fb;
+  --yr-muted:#9299a8;
+  --yr-line:rgba(255,255,255,.10);
+  --yr-shadow:0 20px 60px rgba(0,0,0,.28);
+  --yr-shadow-strong:0 28px 86px rgba(0,0,0,.36);
+  --yr-green:#5bd69a;
+  --yr-green-2:#2ac982;
+  --yr-green-soft:rgba(91,214,154,.11);
+  --ink:var(--yr-text);
+  --muted:var(--yr-muted);
+  --line:var(--yr-line);
+  --surface:var(--yr-panel);
+  --soft:var(--yr-bg);
+  --purple:var(--yr-green);
+  --lime:var(--yr-brand);
+  --shadow:var(--yr-shadow);
+  color-scheme:dark;
+}
+html,body{background:var(--yr-bg)!important;color:var(--yr-text)!important}
+body{
+  background:
+    radial-gradient(circle at 78% -8%,color-mix(in srgb,var(--yr-green) 11%,transparent),transparent 31rem),
+    radial-gradient(circle at 48% -10%,rgba(198,255,0,.045),transparent 25rem),
+    var(--yr-bg)!important;
+  background-attachment:fixed!important;
+  -webkit-font-smoothing:antialiased;
+  transition:background .18s ease,color .18s ease;
+}
+.shell{width:min(1180px,calc(100% - 40px))}
+.topChrome{background:transparent}
+.navWrap{background:color-mix(in srgb,var(--yr-panel) 88%,transparent)!important;border-color:var(--yr-line)!important;backdrop-filter:saturate(160%) blur(24px)!important;-webkit-backdrop-filter:saturate(160%) blur(24px)!important}
+.nav{height:64px!important;gap:22px!important}
+.brand{font-size:18px;color:var(--yr-text)!important}.brandMark{width:34px!important;height:34px!important;border-radius:10px!important;background:#171719!important;box-shadow:0 12px 30px rgba(0,0,0,.16)!important}.brandMark svg{width:25px!important;height:25px!important}.brandDot{color:var(--yr-brand)!important}.brandName{font-size:16px!important}.brandName small{font-size:9px!important;color:var(--yr-muted)!important;margin-top:3px!important}
+.navlinks{gap:2px}.navlinks button,.cartButton{color:var(--yr-muted)!important;font-size:12px!important;padding:9px 10px!important;border-radius:10px!important}.navlinks button:hover{background:var(--yr-panel2)!important;color:var(--yr-text)!important}.navlinks button.active{background:transparent!important;color:var(--yr-text)!important;font-weight:800!important;position:relative}.navlinks button.active:after{content:"";position:absolute;left:10px;right:10px;bottom:-13px;height:2px;background:var(--yr-green);border-radius:2px}.cartButton{color:var(--yr-text)!important}.cartCount{background:var(--yr-green)!important;color:#fff!important}.avatar{width:36px!important;height:36px!important;background:var(--yr-green-soft)!important;color:var(--yr-green)!important}
+.yr-shared-theme-toggle{width:36px;height:36px;display:grid;place-items:center;border:1px solid var(--yr-line);border-radius:12px;background:var(--yr-panel2);color:var(--yr-text);font-weight:850;cursor:pointer;flex:0 0 auto}.yr-shared-theme-toggle:hover{background:color-mix(in srgb,var(--yr-panel2) 82%,var(--yr-green) 18%)}:root[data-theme="light"] .yr-shared-theme-toggle{background:#fff}
+.modeStrip{background:#0f1512!important;border-bottom:1px solid rgba(198,255,0,.12)!important;color:#aeb7b2!important}.modeStrip .shell{height:34px!important}.modeStrip strong{color:#fff}.safePill{border-color:rgba(198,255,0,.22)!important;color:var(--yr-brand)!important;background:rgba(198,255,0,.055)}
+
+/* Shared controls */
+.btn{min-height:40px!important;border-radius:10px!important;padding:0 14px!important;font-size:12px!important;font-weight:800!important}.btn.small{min-height:36px!important;padding:0 11px!important}.btn.primary{background:linear-gradient(120deg,#127351,#1e9a6b)!important;color:#fff!important;box-shadow:0 10px 26px rgba(22,129,92,.20)!important}.btn.primary:hover{filter:brightness(1.05)}.btn.secondary,.btn.light{background:var(--yr-panel)!important;color:var(--yr-text)!important;border:1px solid var(--yr-line)!important}.btn.ghostLight{border-color:rgba(255,255,255,.18)!important;background:rgba(255,255,255,.06)!important}.kicker,.eyebrow{color:var(--yr-green)!important}.kicker.dark,.kicker.lime{color:var(--yr-brand)!important}
+:where(button,a,input,select,textarea):focus-visible{outline:3px solid color-mix(in srgb,var(--yr-green) 58%,transparent);outline-offset:3px}
+:where(input,select,textarea){background:var(--yr-panel2)!important;color:var(--yr-text)!important;border-color:var(--yr-line)!important}
+:where(input,select,textarea):focus{border-color:color-mix(in srgb,var(--yr-green) 58%,var(--yr-line))!important;box-shadow:0 0 0 3px color-mix(in srgb,var(--yr-green) 12%,transparent)!important}
+
+/* Public marketplace should still feel like YasReady, not a detached bookstore. */
+.hero{background:transparent!important;color:var(--yr-text)!important;padding:28px 0 0!important}.heroGrid{min-height:430px!important;border:1px solid color-mix(in srgb,var(--yr-green) 24%,var(--yr-line))!important;border-radius:24px!important;padding:38px 42px!important;background:linear-gradient(125deg,color-mix(in srgb,var(--yr-panel) 92%,var(--yr-green) 8%),var(--yr-panel))!important;box-shadow:var(--yr-shadow)!important;overflow:hidden}.heroCopy h1{font-size:clamp(46px,5.8vw,68px)!important;line-height:.96!important;margin:10px 0 16px!important;color:var(--yr-text)!important}.heroCopy h1 span{color:var(--yr-green)!important}.heroCopy>p{font-size:16px!important;line-height:1.52!important;color:var(--yr-muted)!important}.heroProof{margin-top:22px!important;color:var(--yr-muted)!important}.heroProof span:before{background:var(--yr-green)!important}.heroStack{height:330px!important}.stackBook{width:180px!important;filter:drop-shadow(0 24px 28px rgba(0,0,0,.22))!important}.stackNote{background:var(--yr-brand)!important;border-radius:13px!important;box-shadow:0 16px 34px rgba(0,0,0,.16)!important}
+.section{padding:58px 0!important}.sectionHead{margin-bottom:22px!important}.sectionHead h2,.pageHead h1,.panelHead h2,.pitchCard h2,.freeToolkit h2{font-size:clamp(28px,3.5vw,42px)!important;letter-spacing:-.043em!important}.sectionHead>p,.pageHead>div:first-child>p{color:var(--yr-muted)!important;font-size:12px!important;line-height:1.5!important}.searchRow{margin:14px 0 22px!important}.searchBox{background:var(--yr-panel)!important;border-color:var(--yr-line)!important;border-radius:12px!important}.searchBox input{background:transparent!important}.filterBtn{background:var(--yr-panel)!important;color:var(--yr-muted)!important;border-color:var(--yr-line)!important;border-radius:999px!important;padding:8px 11px!important}.filterBtn.active{background:var(--yr-text)!important;color:var(--yr-panel)!important;border-color:var(--yr-text)!important}
+.bookGrid{gap:13px!important}.bookCard{background:var(--yr-panel)!important;border-color:var(--yr-line)!important;border-radius:18px!important;box-shadow:none!important}.bookMeta{padding:16px!important}.bookMeta h3{font-size:17px!important}.bookMeta>p,.rating,.from span{color:var(--yr-muted)!important}.editionChip{background:var(--yr-panel2)!important;color:var(--yr-muted)!important}.editionChip.live{background:var(--yr-green-soft)!important;color:var(--yr-green)!important}.cardBottom{border-color:var(--yr-line)!important;margin-top:11px!important;padding-top:11px!important}.pitchCard{background:linear-gradient(145deg,#0c1511,#13231b)!important;border:1px solid rgba(198,255,0,.08)!important;border-radius:20px!important;padding:28px!important;box-shadow:none!important}.pitchCard p{color:#aeb7b2!important}.pitchFlow div{border-color:rgba(255,255,255,.12)!important;border-radius:12px!important;width:64px!important;height:64px!important}
+
+/* Operating app density + surface parity */
+.creatorView{padding:28px 0 58px!important}.pageHead{margin-bottom:18px!important}.pageHead h1{font-size:clamp(30px,4vw,44px)!important;margin:5px 0 7px!important}.pageActions{gap:7px!important}.accountBanner,.panel,.metricCard,.manageBook,.integrationCard,.importFuture,.noticeBar,.channelLane,.freeToolkit{background:var(--yr-panel)!important;color:var(--yr-text)!important;border:1px solid var(--yr-line)!important;box-shadow:none!important}.accountBanner{border-radius:15px!important;padding:15px 16px!important;background:linear-gradient(125deg,color-mix(in srgb,var(--yr-panel) 94%,var(--yr-green) 6%),var(--yr-panel))!important}.accountIcon{width:40px!important;height:40px!important;background:#171719!important}.accountBanner p,.panel p,.integrationCard p,.dataContract p,.helper,.subtle{color:var(--yr-muted)!important}.accountStatus{background:var(--yr-panel2)!important;border-color:var(--yr-line)!important;color:var(--yr-text)!important}.statusDot{background:var(--yr-green)!important}
+.metricsGrid{gap:8px!important;margin-bottom:10px!important}.metricCard{border-radius:14px!important;padding:14px!important}.metricCard strong{font-size:24px!important;margin:5px 0 3px!important}.metricCard span,.metricCard small{font-size:9px!important}.metricCard.purple{background:linear-gradient(125deg,color-mix(in srgb,var(--yr-panel) 90%,var(--yr-green) 10%),var(--yr-panel))!important;color:var(--yr-text)!important;border-color:color-mix(in srgb,var(--yr-green) 26%,var(--yr-line))!important}.metricCard.purple span,.metricCard.purple small{color:var(--yr-muted)!important}.metricCard.limeCard{background:color-mix(in srgb,var(--yr-brand) 13%,var(--yr-panel))!important;border-color:color-mix(in srgb,var(--yr-brand) 28%,var(--yr-line))!important}
+.panel{border-radius:15px!important;padding:16px!important}.panelHead{margin-bottom:10px!important}.panelHead h2{font-size:17px!important;margin:4px 0 0!important}.microLabel{font-size:8px!important;color:var(--yr-muted)!important}.twoCol{gap:8px!important}.salesFooter{gap:7px!important}.salesFooter>div,.integrationMini,.flowList>div,.sourceRow,.campaignRow,.copyOption,.safetyGrid>div{background:var(--yr-panel2)!important;border-color:var(--yr-line)!important}.miniBookRow,.editionRow{border-color:var(--yr-line)!important;color:var(--yr-text)!important}.miniBookRow:hover{background:var(--yr-panel2)!important}.liveBadge,.freeTag,.integrationStatus.connected,.integrationStatus.ready{background:var(--yr-green-soft)!important;color:var(--yr-green)!important}.softAction,.textButton{color:var(--yr-green)!important}.systemFlow>div{background:var(--yr-panel2)!important;border-color:var(--yr-line)!important}.systemFlow>div.activeSystem{background:linear-gradient(125deg,color-mix(in srgb,var(--yr-panel) 89%,var(--yr-green) 11%),var(--yr-panel))!important;border-color:color-mix(in srgb,var(--yr-green) 28%,var(--yr-line))!important}.systemIcon,.formatIcon{background:var(--yr-green-soft)!important;color:var(--yr-green)!important}.noticeBar{background:color-mix(in srgb,var(--yr-green) 6%,var(--yr-panel))!important;border-color:color-mix(in srgb,var(--yr-green) 22%,var(--yr-line))!important}.noticeIcon{background:var(--yr-green-soft)!important;color:var(--yr-green)!important}.manageBook{border-radius:15px!important}.importFuture{background:var(--yr-panel2)!important;border-radius:14px!important}.payloadChips span{background:var(--yr-panel)!important;border:1px solid var(--yr-line)!important;color:var(--yr-muted)!important}.integrationCard{border-radius:15px!important;padding:15px!important}.integrationLogo{background:#171719!important}.integrationLogo.ready,.integrationLogo.connected{background:var(--yr-green)!important}.integrationLogo.future{background:var(--yr-panel2)!important;color:var(--yr-muted)!important}.architecturePanel,.dataContract{margin-bottom:10px!important}.safetyGrid>div{border-radius:12px!important}.offPill{background:var(--yr-panel)!important;color:var(--yr-muted)!important;border:1px solid var(--yr-line)!important}.dataContract pre,.panel pre{background:#0c1511!important;color:#c6ff00!important;border:1px solid rgba(198,255,0,.08)!important}.channelLane,.freeToolkit{background:linear-gradient(145deg,#0c1511,#13231b)!important;color:#fff!important;border-color:rgba(198,255,0,.08)!important}.channelLane p{color:#aeb7b2!important}.toolGrid div{border-color:rgba(255,255,255,.10)!important;color:#c9d2cc!important}.toolGrid span{color:var(--yr-brand)!important}
+
+/* Tables, builders, and operations */
+.promoteBookSelect,.formGrid label,.copyField,.embedPreview,.qrFrame{background:var(--yr-panel2)!important;border-color:var(--yr-line)!important;color:var(--yr-text)!important}.copyField input{background:transparent!important}.copyField button,.copyOption button,.embedPreview button{background:var(--yr-text)!important;color:var(--yr-panel)!important}.sourceHead,.campaignHead,.ordersHead{color:var(--yr-muted)!important;border-color:var(--yr-line)!important}.sourceRow,.campaignRow,.orderRow{border-color:var(--yr-line)!important}.mixTrack,.sparkGrid i{background:var(--yr-panel2)!important}.mixTrack i,.bars span,.bars span.last{background:linear-gradient(90deg,var(--yr-green),var(--yr-green-2))!important}.orderDot{background:var(--yr-green)!important}
+
+/* Modals/drawers follow the same theme. */
+.bookModal,.cartDrawer,.modalBody,footer{background:var(--yr-panel)!important;color:var(--yr-text)!important}.modalCover{background:var(--yr-panel2)!important}.modalClose,.drawerHead button{background:var(--yr-panel2)!important;color:var(--yr-text)!important}.modalBody h3,.byline,.modalDesc,.buyRow span,.modalNote,.cartItem>div:first-child span,.cartFine{color:var(--yr-muted)!important}.buyRow,.cartItem,footer{border-color:var(--yr-line)!important}.modalNote{background:var(--yr-panel2)!important}.drawerShade,.modalShade{background:rgba(0,0,0,.62)!important}.toast{background:#0f1512!important}
+footer .shell>div{color:var(--yr-text)!important}footer .shell,footer p{color:var(--yr-muted)!important}footer span,footer strong span{color:var(--yr-brand)!important}
+
+/* Dark-theme legacy surface sweep. */
+:root[data-theme="dark"] :where(.bookCard,.searchBox,.filterBtn,.accountBanner,.panel,.metricCard,.manageBook,.integrationCard,.importFuture,.noticeBar,.bookModal,.cartDrawer,.modalBody,.promoteBookSelect,.formGrid label,.copyField,.embedPreview,.qrFrame,footer){background:var(--yr-panel)!important;color:var(--yr-text)!important;border-color:var(--yr-line)!important}
+:root[data-theme="dark"] :where(.bookMeta>p,.rating,.from span,.accountBanner p,.panel p,.pageHead p,.sectionHead p,.integrationCard p,.modalDesc,.byline,.modalBody h3,.helper,.subtle){color:var(--yr-muted)!important}
+
+@media(max-width:980px){.shell{width:min(100% - 24px,1180px)}.nav{gap:10px!important}.navlinks{overflow:auto}.navlinks button{white-space:nowrap}.heroGrid{padding:30px!important}.heroStack{height:290px!important}.stackBook{width:150px!important}}
+@media(max-width:780px){.shell{width:calc(100% - 18px)}.nav{height:58px!important}.brand{font-size:16px}.yr-shared-theme-toggle{width:34px;height:34px}.navlinks button.active:after{display:none}.hero{padding-top:12px!important}.heroGrid{border-radius:18px!important;padding:28px 22px!important}.heroCopy h1{font-size:clamp(42px,12vw,58px)!important}.heroCopy>p{font-size:15px!important}.creatorView{padding-top:18px!important}.panel,.accountBanner,.metricCard{border-radius:13px!important}.metricsGrid,.metricsGrid.five{gap:7px!important}}

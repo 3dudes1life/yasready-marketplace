@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0 — Publishing Handshake
+
+- restores exact YasReady platform visual parity instead of a separate bookstore-adjacent look
+- adopts shared YasReady light/dark tokens, green operating accent and Ready Lime status signal
+- uses the same `yasready-theme` preference contract as the wider platform
+- adds the compact 64px YasReady shell, shared panel density and green-gradient primary actions
+- adds a dedicated visual-parity verifier so future Marketplace builds cannot casually drift away again
+- adds signed one-way Publishing → Marketplace handoff contract
+- binds imported books to the same central YasReady user ID
+- reuses an existing source-linked Marketplace book instead of duplicating it
+- adds durable Publishing source-book and source-edition links
+- stores source revision, artifact reference/hash and production sync status
+- adds SHA-256 payload replay/idempotency protection
+- adds field-level sync provenance with publishing vs marketplace ownership
+- preserves author Marketplace pricing when Publishing later suggests a different price
+- creates/updates imports as drafts; Publishing cannot make a listing live
+- adds author readiness, go-live and pause APIs
+- adds immutable Marketplace launch-event audit records
+- adds author import history and sync-change APIs
+- adds Launch workspace in the Marketplace UI
+- adds a complete example handoff payload plus signing/verification utilities
+- keeps Publishing import fail-closed by default
+- retains v0.4 Ingram Bridge, v0.3 Commerce Closure, marketing attribution and Business export architecture
+
 ## 0.4.0 — Ingram Bridge
 
 - fixes GitHub Pages white-screen deployment by making the repo-root demo project-path safe

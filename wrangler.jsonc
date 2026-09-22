@@ -31,6 +31,7 @@
     "STRIPE_DEFAULT_COUNTRY": "US",
     "PUBLIC_APP_URL": "https://marketplace.yasready.com",
     "PUBLISHING_IMPORT_ENABLED": "false",
+    "PUBLISHING_HANDOFF_SCHEMA": "yasready.publishing.marketplace.v1",
     "PAYOUTS_ENABLED": "false",
     "REFUNDS_ENABLED": "false",
     "TRANSFERS_ENABLED": "false",

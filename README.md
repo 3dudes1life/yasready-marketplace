@@ -1,62 +1,92 @@
-# Marketplace | YasReady v0.4.0
+# Marketplace | YasReady v0.5.0
 
 `marketplace.yasready.com`
 
-Standalone YasReady marketplace engine for taking a finished indie book from **ready to sell → sold → promoted → fulfilled → measured** without destabilizing Publishing | YasReady.
+Standalone YasReady marketplace engine for taking a finished indie book from **made → sellable → sold → promoted → fulfilled → measured** without destabilizing Publishing | YasReady.
 
 ## Product boundary
 
 - **Publishing | YasReady** owns how a book is made.
-- **Marketplace | YasReady** owns how it is listed, sold, promoted, fulfilled and commercially measured.
+- **Marketplace | YasReady** owns how it is listed, priced, sold, promoted, fulfilled and commercially measured.
 - **Business | YasReady** consumes a versioned commercial export later.
 - Marketplace uses the **same YasReady account identity** as Publishing; there is no second author login.
 
-## v0.4.0 — Ingram Bridge
+## YasReady visual parity
 
-### Reader + author product
-- multi-format storefront and multi-author cart model
-- My Books, Sales, Commerce, **Fulfillment**, Promote and Connections workspaces
-- same-account author mapping
-- free marketing kit with tracked links, QR, embeds and ready-to-post copy
-- Business-ready marketplace analytics contract
+v0.5 also closes the visual mismatch with the rest of the YasReady platform. Marketplace now uses the shared YasReady light/dark surface system, compact 64px shell, green operating accent, Ready Lime status signal, dense Apple-style cards and the same `yasready-theme` appearance preference used across the wider platform. Marketplace remains a bookstore where readers need it to be, but the author workspace now looks and behaves like another YasReady module.
 
-### Commerce Closure retained
-- Stripe Connect/Checkout architecture behind explicit gates
-- webhook replay protection
-- immutable order economics snapshots
-- marketplace fee, processor fee, fulfillment cost and author payable separated
-- refunds, transfer/payout ledger, disputes and reconciliation
+## v0.5.0 — Publishing Handshake
 
-### Ingram Bridge
-Marketplace does not fake a private IngramSpark API. v0.4 models the publicly documented retailer integration lifecycle and leaves transport contract-specific:
+v0.5 closes the product loop without merging the codebases.
 
-- metadata feed snapshots
-- inventory/availability snapshots
-- provider-cost snapshots
-- normalized purchase-order envelope
-- PO acknowledgment / fulfillment event ingestion
-- shipment + tracking normalization
-- invoice + invoice-line ingestion
-- fulfillment attempts and bounded retry scheduling
-- dead-letter queue for records that cannot safely reconcile
-- provider sync runs + cursors for freshness
-- external Ingram sales remain a separate channel ledger
-- Share & Sell remains available as a fallback
+### One-way signed handoff
 
-### GitHub Pages demo fix
-The previous white page was a deployment/bootstrap problem: raw Vite source was served at a GitHub project path while the page requested `/src/main.js` from the domain root. v0.4 is safe to demo directly from the repo root on GitHub Pages and includes:
+Publishing can send a completed-production package to:
 
-- relative module/bootstrap paths
-- lazy QR loading so an optional CDN failure cannot blank the storefront
-- linked source stylesheet rather than a browser-invalid CSS module import
-- guarded `import.meta.env` access
-- project-safe campaign URLs
-- `404.html` book-route fallback
-- `npm run verify:pages`
+`POST /api/integrations/publishing/handoff`
+
+The endpoint is disabled by default and requires a timestamped HMAC signature plus the shared schema:
+
+`yasready.publishing.marketplace.v1`
+
+The package carries the YasReady `userId`, Publishing source book/edition IDs, source revision, book metadata, edition formats/ISBNs, production state and artifact provenance.
+
+### Same account, no second backend identity
+
+Marketplace maps the incoming `userId` to the existing `authors.user_id`. A Publishing source book cannot be reassigned to another YasReady account. Existing Marketplace books already carrying the same `publishing_source_id` are linked rather than duplicated.
+
+### Field ownership prevents destructive syncs
+
+**Publishing-owned production truth** may sync:
+
+- title / subtitle / description
+- cover + category
+- formats + ISBNs
+- provider title/SKU references
+- production state
+- production artifact reference/hash
+
+**Marketplace-owned commercial truth** stays under the author’s control:
+
+- public slug
+- listing status / visibility
+- sale price after first import
+- marketing campaigns
+- orders, reviews and analytics
+
+A later Publishing price suggestion never silently overwrites the Marketplace sale price. The difference is logged as `preserved` provenance.
+
+### Explicit author launch gate
+
+A handoff creates or updates a **draft**. Publishing cannot put a title on sale.
+
+Author APIs:
+
+- `GET /api/me/publishing/imports`
+- `GET /api/me/publishing/changes?bookId=...`
+- `GET /api/me/books/:bookId/readiness`
+- `POST /api/me/books/:bookId/go-live`
+- `POST /api/me/books/:bookId/pause`
+
+Go-live runs readiness checks, records an immutable launch event and activates only the editions selected by the author.
+
+### Author workspace
+
+The app now includes **Launch** alongside My Books, Sales, Commerce, Fulfillment, Promote and Connections. It explains the Publishing → Marketplace contract and gives the author a clear approval point before sale.
+
+## Everything retained from v0.4
+
+- GitHub Pages-safe demo deployment
+- multi-format storefront and multi-author cart architecture
+- Stripe Checkout + Connect test architecture behind safety gates
+- immutable commerce/refund/transfer ledgers
+- Ingram metadata, inventory, PO/document, shipment, invoice, retry and dead-letter bridge
+- tracked links, QR codes, HTML embeds and promo copy
+- marketplace stats + Business-ready export contract
 
 ## Safety defaults
 
-All real-money/provider submission switches stay OFF:
+All real-money/provider/source integration switches remain OFF:
 
 - `CHECKOUT_ENABLED=false`
 - `STRIPE_MODE=off`
@@ -72,17 +102,30 @@ All real-money/provider submission switches stay OFF:
 - `INGRAM_RETRY_ENABLED=false`
 - `PUBLISHING_IMPORT_ENABLED=false`
 
-## GitHub Pages check
+## Verify the handshake
 
 ```bash
+npm run verify:publishing
+npm run verify:style
+npm test
 npm run verify:pages
 ```
 
-or double-click `PAGES_VERIFY.command`.
+or double-click `PUBLISHING_HANDSHAKE_VERIFY.command`.
+
+A complete sample payload lives at:
+
+`examples/publishing-handoff.example.json`
+
+To generate a valid signature header for that payload:
+
+```bash
+node scripts/sign-publishing-handoff.mjs examples/publishing-handoff.example.json YOUR_SECRET
+```
+
+## GitHub / local
 
 GitHub target: `https://github.com/3dudes1life/yasready-marketplace.git`
-
-## Local app
 
 ```bash
 npm install
@@ -91,23 +134,14 @@ npm run dev
 
 `SHOWCASE.command` opens the no-install preview.
 
-## Full Worker + D1
-
-```bash
-npm install
-npm run build
-npm run db:migrate:local
-npm run cloudflare:dev
-```
-
 ## Before production
 
-1. Bind the production D1 database.
-2. Connect the same central YasReady identity provider used by Publishing.
-3. Certify Stripe in test mode.
-4. Resolve merchant-of-record / marketplace-facilitator / tax obligations.
-5. Establish the correct Ingram retailer/technical relationship and approved transport.
-6. Turn on Ingram feed types individually and validate reconciliation before any order submission.
-7. Keep Publishing import disabled until Marketplace independently passes beta.
+1. Bind production D1 and apply all migrations.
+2. Connect the same central YasReady OIDC provider used by Publishing.
+3. Certify Stripe in test mode and resolve marketplace/tax/MoR obligations.
+4. Establish the approved Ingram technical relationship and transport.
+5. Keep `PUBLISHING_IMPORT_ENABLED=false` until the Publishing sender is built and its secret is stored securely on both sides.
+6. Run a dry handoff, inspect field provenance, then intentionally enable the connection.
+7. Keep the author go-live gate; do not let Publishing auto-publish Marketplace listings.
 
-See `docs/INGRAM-BRIDGE.md`, `docs/GITHUB-PAGES.md`, and the remaining `docs/` contracts.
+See `docs/PUBLISHING-HANDSHAKE.md`, `docs/INGRAM-BRIDGE.md`, `docs/COMMERCE-CLOSURE.md`, and the remaining contracts under `docs/`.
