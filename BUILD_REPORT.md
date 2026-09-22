@@ -1,79 +1,92 @@
-# Marketplace | YasReady v0.5.0 — Build Report
+# Marketplace | YasReady v0.6.0 — Build Report
 
 ## Result
 
-**PASS — Publishing Handshake package ready for repository upload and demo.**
+**PASS — YasReady UI Closure package is ready for repository upload and demo.**
 
-v0.5.0 keeps Marketplace in its own repository while adding the receiving side of a safe Publishing → Marketplace connection. Publishing remains untouched by this package.
+v0.6 deliberately avoids another major feature expansion. It closes the structural UI gap between Marketplace and the wider YasReady platform while preserving the existing Publishing, commerce, Ingram, marketing and analytics architecture.
 
 ## Verification completed
 
 - `node --check src/main.js` — PASS
 - `node --check src/worker.mjs` — PASS
 - `node --check src/lib/publishing-handoff.mjs` — PASS
-- `npm run verify:publishing` — **8/8 PASS**
+- `npm test` — **47/47 PASS**
+- `npm run verify:ui` — **20/20 PASS**
+- `npm run verify:style` — **16/16 PASS**
 - `npm run verify:pages` — **7/7 PASS**
-- `npm run verify:style` — **12/12 PASS**
-- `npm test` — **40/40 PASS**
-- fresh SQLite migration replay through Python sqlite3 — **8/8 migrations PASS**
+- `npm run verify:publishing` — **8/8 PASS**
+- fresh SQLite migration replay — **8/8 migrations PASS**
 - fresh schema after migrations — **52 application tables**
-- Publishing provenance tables present — PASS
+- local static smoke: root HTML, shared YasReady mark and `src/main.js` — PASS
 
+## UI Closure
 
-## YasReady visual parity closure
+### Public Marketplace
 
-The Marketplace no longer carries its earlier purple-first / oversized bookstore-adjacent operating UI. v0.5 now locks to the shared YasReady platform system:
+Readers now get a deliberately simple consumer shell:
 
-- shared light/dark theme preference via `yasready-theme`
-- Ready Lime `#C6FF00` as a readiness/status signal
-- YasReady green `#16815c` as the primary operating accent
-- compact 64px platform navigation shell
-- green-gradient primary actions
-- shared panel/background/muted/line tokens in light and dark mode
-- compact operating cards and controls consistent with Business and Publishing
-- dedicated regression verification in `scripts/verify-yasready-style.mjs`
+- compact Marketplace | YasReady header
+- Browse / author entry points
+- bag + appearance controls
+- book-first discovery surfaces
+- quieter cards and reduced dashboard-like chrome
+- responsive single-column mobile behavior
 
-## Publishing Handshake closure
+### Author workspace
 
-The receiving architecture now proves:
+Authors now enter a dedicated YasReady operating environment:
 
-- same YasReady account / `userId` is the ownership key
-- source books and source editions receive durable cross-product links
-- the payload is schema-versioned and SHA-256 hashed
-- repeated identical payloads are idempotent
-- service-to-service requests require a timestamped HMAC signature
-- a Publishing source book cannot be attached to a different YasReady user
-- production-owned fields can sync forward
-- Marketplace-owned commercial fields are not silently overwritten
-- changed Publishing price suggestions are recorded as preserved Marketplace values
-- imports create/update drafts only
-- author readiness and explicit go-live are separate actions
-- every launch attempt can be audited
+- fixed left rail on desktop
+- grouped **Workspace / Grow / Operations** navigation
+- compact top utility bar
+- environment state
+- live-money safety signal
+- bag, appearance and account controls
+- storefront return action
+- mobile workspace navigation below 860px
 
-## New operational surfaces
+The author interface no longer tries to fit nine operational modules into the public storefront navigation.
 
-- `POST /api/integrations/publishing/handoff`
-- `GET /api/integrations/publishing/status`
-- `GET /api/me/publishing/imports`
-- `GET /api/me/publishing/changes?bookId=...`
-- `GET /api/me/books/:bookId/readiness`
-- `POST /api/me/books/:bookId/go-live`
-- `POST /api/me/books/:bookId/pause`
-- Launch workspace in the author UI
-- `examples/publishing-handoff.example.json`
-- `scripts/sign-publishing-handoff.mjs`
-- `scripts/verify-publishing.mjs`
-- `PUBLISHING_HANDSHAKE_VERIFY.command`
+## Brand/system closure
 
-## Safety
+- exact shared YasReady `Y.` image asset replaces the custom Marketplace SVG approximation
+- Ready Lime `#C6FF00` stays a readiness/status signal
+- YasReady green `#16815c` remains the operating/action accent
+- same `yasready-theme` preference contract
+- shared light/dark surfaces
+- tighter YasReady radii and information density
+- consistent table, form, panel, modal and drawer treatments
+- focus-visible and reduced-motion behavior retained
 
-`PUBLISHING_IMPORT_ENABLED=false` remains the tracked default and a configured `PUBLISHING_IMPORT_SECRET` is required even after the feature gate is enabled. The handoff cannot directly make a listing live.
+## First-class UI states
 
-All Stripe and Ingram live actions remain fail-closed as in prior builds.
+v0.6 introduces reusable:
+
+- loading state
+- skeleton cards
+- safe error state
+- mobile operating navigation
+
+These are intentionally part of the core UI system so later catalog/reader/commerce features do not invent their own visual language.
+
+## Architecture retained unchanged
+
+v0.6 adds **no database migration** and does not change the core money/provider contracts. It retains:
+
+- one shared YasReady author identity
+- v0.5 signed Publishing Handshake + explicit author go-live gate
+- v0.4 Ingram metadata / stock / document / shipment / invoice / retry / dead-letter bridge
+- v0.3 immutable commerce, refund and transfer ledgers
+- multi-author allocation model
+- marketing attribution, QR and embed infrastructure
+- versioned Business | YasReady export
+- GitHub Pages-safe source bootstrap
+- fail-closed Stripe, Ingram and Publishing switches
 
 ## Production bundle limitation in this environment
 
-`npm run build` could not execute because `vite` is not installed in this runtime (`node_modules` is absent). Therefore the Vite production bundle is **not claimed as verified here**. Source syntax, engine tests, Pages checks, Publishing Handshake verification and full migration replay are verified.
+The Vite production bundle is **not claimed as verified** because `node_modules` / Vite are not installed in this runtime. The source, engine, Pages, Publishing, visual-system and migration checks above are verified independently.
 
 Run locally after dependency installation:
 

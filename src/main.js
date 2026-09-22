@@ -29,7 +29,22 @@ function setTheme(theme){
 }
 function themeGlyph(){return currentTheme()==='dark'?'☀':'☾'}
 
-const brandMark=`<span class="brandMark"><svg viewBox="0 0 64 64" aria-hidden="true"><path d="M12 10h12l8 15 8-15h12L37 36v17H27V36z" fill="white"/><circle cx="50" cy="49" r="5.5" fill="#dfff78"/></svg></span>`;
+const brandMark=`<span class="brandMark"><img src="./yasready-mark.png" alt="" aria-hidden="true"></span>`;
+
+const navIcon=id=>{
+  const icons={
+    store:'<path d="M3 10.5 12 3l9 7.5"/><path d="M5.5 9.5V21h13V9.5"/><path d="M9.5 21v-6h5v6"/>',
+    dashboard:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    books:'<path d="M5 4.5h10a3 3 0 0 1 3 3V20H8a3 3 0 0 1-3-3z"/><path d="M8 4.5v15.5"/><path d="M18 7.5h1a2 2 0 0 1 2 2V20h-3"/>',
+    launch:'<path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 18v3h14v-3"/>',
+    sales:'<path d="M4 19V9"/><path d="M10 19V5"/><path d="M16 19v-7"/><path d="M22 19V3"/>',
+    commerce:'<rect x="3" y="5" width="18" height="14" rx="3"/><path d="M3 10h18"/><path d="M7 15h4"/>',
+    fulfillment:'<path d="M3 7.5 12 3l9 4.5-9 4.5z"/><path d="M3 7.5V17l9 4 9-4V7.5"/><path d="M12 12v9"/>',
+    marketing:'<path d="m4 14 11-5v10L4 14z"/><path d="M15 11.5h3a3 3 0 0 1 0 6h-3"/><path d="m6 15 1.5 5h3L9 16"/>',
+    integrations:'<path d="M8 12a4 4 0 1 1 4-4"/><path d="M16 12a4 4 0 1 1-4 4"/><path d="M10 12h4"/>'
+  };
+  return `<svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true">${icons[id]||icons.dashboard}</svg>`;
+};
 
 async function renderQr(canvas,url){
   try{
@@ -50,14 +65,36 @@ function coverTheme(b){return b.cover||({
 function cover(b,small=false){return `<div class="cover ${small?'small':''}" style="background:${coverTheme(b)}"><div class="coverTop">${b.series?esc(b.series):'YASREADY BOOKS'}</div><h3>${esc(b.title)}</h3><p>${esc(b.subtitle||b.author)}</p><span class="coverAuthor">${esc(b.author)}</span></div>`}
 
 function shell(){
-  const nav=[['store','Marketplace'],['dashboard','Home'],['books','My Books'],['launch','Launch'],['sales','Sales'],['commerce','Commerce'],['fulfillment','Fulfillment'],['marketing','Promote'],['integrations','Connections']];
-  return `<div class="topChrome">
-    <div class="navWrap"><div class="shell nav">
-      <button class="brand" data-nav="store">${brandMark}<span class="brandName">Marketplace <span class="brandDot">|</span> YasReady<small>Books made sellable.</small></span></button>
-      <div class="navlinks">${nav.map(([id,label])=>`<button data-nav="${id}" class="${state.view===id?'active':''}">${label}</button>`).join('')}</div>
-      <div class="navright"><button class="cartButton" data-cart>Bag <span class="cartCount ${state.cart.length?'':'hidden'}">${state.cart.length}</span></button><button class="yr-shared-theme-toggle" data-theme-toggle title="Switch appearance" aria-label="Switch light and dark appearance">${themeGlyph()}</button><button class="avatar" data-nav="dashboard" title="Same YasReady account">${avatarLetters()}</button></div>
-    </div></div>
-    <div class="modeStrip"><div class="shell"><span><strong>v0.5.0 · Publishing Handshake</strong> <i></i> ${state.api?'D1/API connected':'demo data'} <i></i> same YasReady account</span><span class="safePill">LIVE MONEY OFF</span></div></div>
+  const all=[['dashboard','Home'],['books','My Books'],['launch','Launch'],['sales','Sales'],['marketing','Promote'],['commerce','Commerce'],['fulfillment','Fulfillment'],['integrations','Connections']];
+  if(state.view==='store'){
+    return `<div class="publicChrome">
+      <div class="shell publicNav">
+        <button class="brand publicBrand" data-nav="store">${brandMark}<span class="brandName">Marketplace <span class="brandDot">|</span> YasReady<small>Independent books, finished all the way.</small></span></button>
+        <div class="publicLinks"><button data-scroll="browse">Browse</button><button data-nav="dashboard">For authors</button></div>
+        <div class="navright"><button class="cartButton" data-cart>Bag <span class="cartCount ${state.cart.length?'':'hidden'}">${state.cart.length}</span></button><button class="yr-shared-theme-toggle" data-theme-toggle title="Switch appearance" aria-label="Switch light and dark appearance">${themeGlyph()}</button><button class="btn primary publicAuthorCta" data-nav="dashboard">Author workspace</button></div>
+      </div>
+    </div>`;
+  }
+  const label=all.find(([id])=>id===state.view)?.[1]||'Home';
+  const groups=[
+    ['Workspace',all.slice(0,4)],
+    ['Grow',[all[4]]],
+    ['Operations',all.slice(5)]
+  ];
+  return `<div class="creatorChrome">
+    <aside class="yrSidebar" aria-label="Marketplace workspace navigation">
+      <button class="brand sidebarBrand" data-nav="dashboard">${brandMark}<span class="brandName">Marketplace <span class="brandDot">|</span> YasReady<small>Author workspace</small></span></button>
+      <div class="sidebarGroups">${groups.map(([name,items])=>`<section class="sidebarGroup"><span>${name}</span>${items.map(([id,text])=>`<button data-nav="${id}" aria-current="${state.view===id?'page':'false'}" class="${state.view===id?'active':''}">${navIcon(id)}<b>${text}</b>${id==='launch'?'<i class="readyMini">READY</i>':''}</button>`).join('')}</section>`).join('')}</div>
+      <div class="sidebarBottom">
+        <button class="storeReturn" data-nav="store">${navIcon('store')}<span><b>View storefront</b><small>marketplace.yasready.com</small></span></button>
+        <div class="accountMini"><div class="avatar">${avatarLetters()}</div><span><b>${esc(state.account.name)}</b><small>Same YasReady account</small></span></div>
+      </div>
+    </aside>
+    <header class="yrTopbar">
+      <div class="topbarTitle"><span>Marketplace</span><i>/</i><strong>${label}</strong><span class="envPill">${state.api?'CONNECTED':'DEMO'}</span></div>
+      <div class="topbarActions"><span class="moneyLock"><i></i> Live money off</span><button class="cartButton" data-cart>Bag <span class="cartCount ${state.cart.length?'':'hidden'}">${state.cart.length}</span></button><button class="yr-shared-theme-toggle" data-theme-toggle title="Switch appearance" aria-label="Switch light and dark appearance">${themeGlyph()}</button><button class="avatar topAvatar" data-nav="dashboard">${avatarLetters()}</button></div>
+    </header>
+    <nav class="yrMobileNav" aria-label="Mobile workspace navigation">${all.map(([id,text])=>`<button data-nav="${id}" class="${state.view===id?'active':''}">${navIcon(id)}<span>${text}</span></button>`).join('')}</nav>
   </div>`;
 }
 
@@ -108,7 +145,7 @@ function booksView(){
   return `<main class="view creatorView">${pageHead('My Books','Your catalog follows your YasReady account.','Books imported from Publishing stay attached to the account that created them. Marketplace owns the listing and sales layer — not the production files.',`<a class="btn secondary" href="https://publishing.yasready.com" target="_blank" rel="noreferrer">Open Publishing ↗</a>`)}
   <div class="shell"><div class="noticeBar"><div class="noticeIcon">↔</div><div><strong>Shared-account contract is active across Publishing and Marketplace.</strong><span>`+'`authors.user_id`'+` maps to the same central YasReady identity. Marketplace never creates a second password.</span></div></div>
   <div class="manageBooks">${mine.map(manageBookCard).join('')}</div>
-  <div class="importFuture"><span class="kicker">v0.5 · Publishing handshake</span><h3>Production can arrive here without taking over the storefront.</h3><p>Marketplace now has the signed receiving contract. Publishing may send production truth into the same YasReady account, while sale price, visibility, campaigns and go-live remain under Marketplace and author control. The tracked switch stays off until the Publishing sender is intentionally connected.</p><div class="payloadChips"><span>Title + metadata</span><span>Cover + provenance</span><span>ISBNs</span><span>Editions</span><span>Production revision</span><span>YasReady user ID</span></div></div>
+  <div class="importFuture"><span class="kicker">Publishing handshake</span><h3>Production can arrive here without taking over the storefront.</h3><p>Marketplace now has the signed receiving contract. Publishing may send production truth into the same YasReady account, while sale price, visibility, campaigns and go-live remain under Marketplace and author control. The tracked switch stays off until the Publishing sender is intentionally connected.</p><div class="payloadChips"><span>Title + metadata</span><span>Cover + provenance</span><span>ISBNs</span><span>Editions</span><span>Production revision</span><span>YasReady user ID</span></div></div>
   </div></main>`;
 }
 function manageBookCard(b){return `<article class="manageBook"><div class="manageCover">${cover(b,true)}</div><div class="manageBody"><div class="manageTitle"><div><span class="liveBadge">${b.listingStatus==='live'?'For sale':'Draft'}</span><h2>${esc(b.title)}</h2><p>${esc(b.subtitle||'')}</p></div><div class="bookMenu">•••</div></div><div class="editionTable">${b.editions.map(e=>`<div class="editionRow"><div><span class="formatIcon">${formatLabel(e.format)[0]}</span><div><strong>${esc(formatLabel(e.format))}</strong><small>${e.isbn?`ISBN ${esc(e.isbn)}`:'No ISBN required'}</small></div></div><div><span class="editionState ${e.status==='live'?'live':''}">${esc(e.status)}</span><strong>${money(e.price)}</strong><small>${e.fulfillment==='ingram'?'Ingram-ready':'YasReady digital'}</small></div></div>`).join('')}</div><div class="manageActions"><button class="btn secondary small" data-book="${b.id}">View listing</button><button class="btn primary small" data-promote="${b.id}">Promote</button></div></div></article>`}
@@ -143,7 +180,7 @@ function salesView(){const d=state.dashboard;return `<main class="view creatorVi
 function commerceView(){
   const d=state.dashboard;
   const gross=d.grossSales||248641, earned=d.authorEarnings||189420;
-  return `<main class="view creatorView">${pageHead('Commerce','Every dollar has a paper trail.','v0.5 keeps the Commerce Closure ledger intact while adding the signed Publishing handoff and author-controlled launch gate.',`<button class="btn secondary" data-nav="sales">Sales intelligence</button><button class="btn primary" data-nav="integrations">Provider status</button>`)}
+  return `<main class="view creatorView">${pageHead('Commerce','Every dollar has a paper trail.','Commerce keeps the immutable ledger intact while the signed Publishing handoff and author-controlled launch gate remain separate.',`<button class="btn secondary" data-nav="sales">Sales intelligence</button><button class="btn primary" data-nav="integrations">Provider status</button>`)}
   <div class="shell"><div class="metricsGrid five">${metric('Captured',money(gross),'Paid Marketplace orders','purple')}${metric('Author earned',money(earned),'Ledger-backed earnings','limeCard')}${metric('Available',money(Math.max(0,earned-52340)),'Before next transfer')}${metric('Transferred',money(52340),'Demo payout ledger')}${metric('Refund reserve',money(1800),'Tracked separately')}</div>
   <div class="twoCol dashboardMain"><section class="panel"><div class="panelHead"><div><span class="microLabel">ORDER LIFECYCLE</span><h2>Nothing gets overwritten</h2></div></div><div class="flowList"><div><strong>1 · Checkout</strong><span>Server validates edition, seller, current price and inventory.</span></div><div><strong>2 · Payment</strong><span>Stripe webhook materializes the paid order exactly once.</span></div><div><strong>3 · Earnings</strong><span>Gross sale, marketplace fee, print reserve and seller payable become ledger entries.</span></div><div><strong>4 · Fulfillment</strong><span>Physical editions queue provider jobs; digital editions can grant entitlements.</span></div><div><strong>5 · Refund / transfer</strong><span>Reversals and payouts are separate records — history never gets rewritten.</span></div></div></section>
   <section class="panel"><div class="panelHead"><div><span class="microLabel">COMMERCE SAFETY</span><h2>Ready to test. Live money locked.</h2></div></div><div class="integrationMini"><strong>Stripe Checkout</strong><span>Test-mode architecture ready</span></div><div class="integrationMini"><strong>Connect sellers</strong><span>Same YasReady author account</span></div><div class="integrationMini"><strong>Refund allocation</strong><span>Pro-rated to the correct book + author</span></div><div class="integrationMini"><strong>Seller transfers</strong><span>Available balance cannot be exceeded</span></div><div class="integrationMini"><strong>Ingram fulfillment</strong><span>Paid physical items enter a queue</span></div><div class="noticeBar"><div class="noticeIcon">$</div><div><strong>Live money remains fail-closed.</strong><span>v0.3 ships with checkout, payouts and refunds disabled until credentials and policies are intentionally enabled.</span></div></div></section></div></div></main>`;
@@ -188,7 +225,7 @@ function marketingView(){
 
 function embedCode(b){const url=`https://marketplace.yasready.com/book/${b.slug}`;return `<a href="${url}" style="display:inline-block;padding:12px 18px;border-radius:999px;background:#1d1d1f;color:#fff;text-decoration:none;font:700 15px -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif">Buy ${b.title} on YasReady</a>`}
 
-function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','One YasReady account. Clean product boundaries.','v0.5.0 keeps identity, Publishing handoff, payments, fulfillment and Business analytics connected by contracts instead of tangled code.')}
+function integrationsView(){return `<main class="view creatorView">${pageHead('Connections','One YasReady account. Clean product boundaries.','v0.6.0 keeps identity, Publishing handoff, payments, fulfillment and Business analytics inside one consistent YasReady operating system.')}
 <div class="shell"><div class="integrationGrid">${integrationCard('Y','YasReady Account','Connected','The same central account used in Publishing becomes the Marketplace author identity. No second signup.','Shared identity','connected')}${integrationCard('S','Stripe Connect','Ready for test credentials','Express onboarding hooks, Checkout Sessions, webhooks, multi-seller allocation and reconciliation boundaries are in the Worker.','Payments + payouts','ready')}${integrationCard('I','Ingram','Partner-ready boundary','Share & Sell fallback plus metadata, stock, Consumer Direct Fulfillment and EDI lifecycle seams. Live fulfillment waits for an approved Ingram relationship.','Print fulfillment','ready')}${integrationCard('B','Business | YasReady','Export contract built','A normalized commercial feed already exposes gross sales, fees, fulfillment costs, author payable, formats and campaign performance.','Business intelligence','future')}</div>
 <section class="panel architecturePanel"><div class="panelHead"><div><span class="microLabel">PRODUCTION SAFETY</span><h2>Things that stay off until they’re real.</h2></div></div><div class="safetyGrid"><div><span class="offPill">OFF</span><strong>Live checkout</strong><p>`+'`CHECKOUT_ENABLED=false`'+` is the tracked default.</p></div><div><span class="offPill">OFF</span><strong>Stripe live mode</strong><p>Requires secret + webhook configuration.</p></div><div><span class="offPill">OFF</span><strong>Ingram order submission</strong><p>No undocumented API calls or fake credentials.</p></div><div><span class="offPill">OFF</span><strong>Publishing transport</strong><p>The signed receiving contract is built, but PUBLISHING_IMPORT_ENABLED=false remains the tracked default and author launch approval is separate.</p></div></div></section>
 <section class="panel dataContract"><div><div class="microLabel">BUSINESS HANDOFF</div><h2>Marketplace already knows the numbers Business will need.</h2><p>When Business is ready, it consumes a versioned Marketplace export instead of learning Marketplace’s internal database.</p></div><pre>{
@@ -211,13 +248,22 @@ function bookModal(b){
 
 function cartDrawer(){
   const total=state.cart.reduce((a,x)=>a+x.price,0),sellers=new Set(state.cart.map(x=>x.authorId)).size;
-  return `<div class="drawerShade" data-close-cart><aside class="cartDrawer" onclick="event.stopPropagation()"><div class="drawerHead"><div><span class="microLabel">YOUR BAG</span><h2>${state.cart.length} ${state.cart.length===1?'item':'items'}</h2></div><button data-close-cart>×</button></div>${state.cart.length?`<div class="cartItems">${state.cart.map((x,i)=>`<div class="cartItem"><div><strong>${esc(x.title)}</strong><span>${esc(x.author)} · ${esc(x.format)}</span></div><div><strong>${money(x.price)}</strong><button data-remove="${i}">Remove</button></div></div>`).join('')}</div><div class="cartSummary"><div><span>Subtotal</span><strong>${money(total)}</strong></div><div><span>Independent authors</span><strong>${sellers}</strong></div></div><button class="btn primary wide" data-demo-checkout>Continue to checkout</button><p class="cartFine">v0.5 validates edition price and seller server-side before Stripe. Stripe test checkout is wired behind server-side safety gates; live money remains intentionally disabled in this package.</p>`:`<div class="emptyCart"><strong>Your bag is empty.</strong><p>Add an edition from any Marketplace listing.</p></div>`}</aside></div>`;
+  return `<div class="drawerShade" data-close-cart><aside class="cartDrawer" onclick="event.stopPropagation()"><div class="drawerHead"><div><span class="microLabel">YOUR BAG</span><h2>${state.cart.length} ${state.cart.length===1?'item':'items'}</h2></div><button data-close-cart>×</button></div>${state.cart.length?`<div class="cartItems">${state.cart.map((x,i)=>`<div class="cartItem"><div><strong>${esc(x.title)}</strong><span>${esc(x.author)} · ${esc(x.format)}</span></div><div><strong>${money(x.price)}</strong><button data-remove="${i}">Remove</button></div></div>`).join('')}</div><div class="cartSummary"><div><span>Subtotal</span><strong>${money(total)}</strong></div><div><span>Independent authors</span><strong>${sellers}</strong></div></div><button class="btn primary wide" data-demo-checkout>Continue to checkout</button><p class="cartFine">v0.6 validates edition price and seller server-side before Stripe. Stripe test checkout is wired behind server-side safety gates; live money remains intentionally disabled in this package.</p>`:`<div class="emptyCart"><strong>Your bag is empty.</strong><p>Add an edition from any Marketplace listing.</p></div>`}</aside></div>`;
+}
+
+function loadingState(label='Loading Marketplace…'){
+  return `<main class="view creatorView"><div class="shell"><div class="stateCard" role="status"><div class="stateSpinner" aria-hidden="true"></div><div><span class="microLabel">YASREADY</span><h2>${esc(label)}</h2><p>Keeping your workspace in sync.</p></div></div><div class="skeletonGrid">${Array.from({length:4},()=>'<div class="skeletonCard"><i></i><b></b><span></span></div>').join('')}</div></div></main>`;
+}
+function errorState(title='Something needs attention',copy='Marketplace could not finish that request. Your existing data has not been changed.'){
+  return `<div class="stateCard errorState" role="alert"><div class="stateIcon">!</div><div><span class="microLabel">NOT CHANGED</span><h2>${esc(title)}</h2><p>${esc(copy)}</p></div></div>`;
 }
 
 function render(){
   const views={store:storeView,dashboard:dashboardView,books:booksView,launch:launchView,sales:salesView,commerce:commerceView,fulfillment:fulfillmentView,marketing:marketingView,integrations:integrationsView};
-  app.innerHTML=shell()+(views[state.view]||storeView)()+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>Make it. Sell it. Understand it.</p><span>v0.5.0 · Publishing Handshake</span></div></footer>`+(state.selected?bookModal(state.selected):'');
-  bind();if(state.view==='marketing')setupMarketing();
+  const creator=state.view!=='store';
+  document.body.classList.toggle('creator-ui',creator);
+  app.innerHTML=shell()+(state.loading?loadingState():(views[state.view]||storeView)())+`<footer><div class="shell"><div>${brandMark}<strong>Marketplace <span>|</span> YasReady</strong></div><p>Make it. Sell it. Understand it.</p><span>v0.6.0 · YasReady UI Closure</span></div></footer>`+(state.selected?bookModal(state.selected):'');
+  bind();if(state.view==='marketing'&&!state.loading)setupMarketing();
 }
 
 function toast(msg){const x=document.createElement('div');x.className='toast';x.textContent=msg;document.body.append(x);setTimeout(()=>x.remove(),2600)}

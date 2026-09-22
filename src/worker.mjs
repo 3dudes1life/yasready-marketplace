@@ -261,7 +261,7 @@ async function authorBookReadiness(env,author,bookId){
 
 async function api(request,env){
   const url=new URL(request.url), path=url.pathname;
-  if(path==='/api/health') return json({ok:true,version:'0.5.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
+  if(path==='/api/health') return json({ok:true,version:'0.6.0',commerce:commerceReadiness(env),mode:env.MARKETPLACE_MODE||'demo',authMode:env.YASREADY_AUTH_MODE||'demo',checkoutEnabled:env.CHECKOUT_ENABLED==='true',stripeMode:env.STRIPE_MODE||'off',ingramMode:env.INGRAM_MODE||'off',database:!!env.DB});
   if(!env.DB && !['/api/providers/ingram/status','/api/providers/ingram/readiness','/api/providers/stripe/status'].includes(path)) return noDb();
 
   if(path==='/api/catalog'&&request.method==='GET') return json({ok:true,books:await getCatalog(env)});
@@ -565,6 +565,6 @@ export default {
     const url=new URL(request.url);
     if(url.pathname.startsWith('/api/')) return api(request,env);
     if(env.ASSETS) return env.ASSETS.fetch(request);
-    return new Response('Marketplace | YasReady · v0.5.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
+    return new Response('Marketplace | YasReady · v0.6.0',{headers:{'content-type':'text/plain;charset=utf-8'}});
   }
 };

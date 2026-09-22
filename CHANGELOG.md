@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0 — YasReady UI Closure
+
+- separates the public consumer storefront from the logged-in author operating shell
+- adds persistent YasReady left navigation rail for desktop author workflows
+- groups author navigation into Workspace, Grow and Operations instead of one crowded horizontal nav
+- adds compact YasReady top utility bar with environment, money-safety, bag, appearance and account controls
+- adds mobile author navigation for smaller screens
+- uses the exact shared YasReady `Y.` mark asset instead of a Marketplace-specific SVG approximation
+- keeps the shared `yasready-theme` light/dark preference contract
+- tightens author metrics, panels, forms, tables and cards to the shared YasReady density
+- reduces public storefront visual weight so books remain the primary content
+- adds explicit loading, skeleton and safe error-state components
+- adds reduced-motion support and stronger focus behavior
+- adds `scripts/verify-ui-closure.mjs` and `UI_CLOSURE_VERIFY.command`
+- adds v0.6 regression tests for author shell structure, mobile behavior and exact mark assets
+- preserves v0.5 Publishing Handshake, v0.4 Ingram Bridge, v0.3 Commerce Closure and all fail-closed safety defaults
+
 ## 0.5.0 — Publishing Handshake
 
 - restores exact YasReady platform visual parity instead of a separate bookstore-adjacent look
