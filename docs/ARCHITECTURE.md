@@ -1,48 +1,55 @@
-# Marketplace | YasReady — v0.1.0 Architecture
+# Marketplace | YasReady — v0.2.0 architecture
 
-## Product boundary
+## Hard product boundaries
 
-Marketplace is a standalone product and repository. Publishing is not imported, modified, or depended upon at runtime.
+`Publishing -> completed-book payload -> Marketplace`
 
-Future integration is intentionally narrow:
+`Marketplace -> versioned commerce export -> Business`
 
-`Publishing -> versioned completed-book payload -> Marketplace`
+Marketplace is deployable and testable without either adjacent product.
 
-`Marketplace -> normalized commerce/analytics export -> Business`
+## Identity
 
-If Marketplace is unavailable, Publishing must continue to work.
+Marketplace trusts the central YasReady identity and maps `sub -> authors.user_id`.
+
+No Marketplace password database exists.
 
 ## Canonical ownership
 
-- **Publishing | YasReady** owns how a book is made.
-- **Marketplace | YasReady** owns how a book is sold.
-- **Business | YasReady** will own how the company is understood.
+- Publishing owns production files/workflow.
+- Marketplace owns listings, commerce, promotion attribution, fulfillment state and author earnings.
+- Business owns whole-company analysis.
 
-Marketplace owns the canonical commercial records: authors, books, editions, listings, campaigns, customers, orders, order items, economics, fulfillment jobs, ledger entries, payouts and marketplace events.
+## Book model
 
-## Analytics from day one
+`Book -> Listing -> Editions`
 
-Stats are not reconstructed from orders later. `marketplace_events` is an immutable-ish event stream intended to capture:
+One listing can expose any combination of:
 
-- book/listing views
-- campaign landings
-- generated/clicked links
-- QR and embed activity
-- cart additions/removals
-- checkout starts/completions
-- payment/refund events
-- edition/format performance
-- fulfillment state transitions
-- payout and reconciliation events
+- ebook
+- paperback
+- hardcover
+- audiobook
 
-Every marketing asset can carry a campaign ID plus source/medium. This keeps future Business ingestion clean.
+That prevents the later audiobook storefront from becoming a second marketplace.
 
-## Commerce safety
+## Commerce model
 
-The tracked Cloudflare config defaults to:
+An order can contain items from multiple authors. Every order item preserves:
 
-- `CHECKOUT_ENABLED=false`
-- `STRIPE_MODE=off`
-- `INGRAM_MODE=off`
+- gross
+- estimated fulfillment cost
+- processor fee
+- allocated tax
+- marketplace fee
+- seller payable
 
-No committed source file contains live credentials. Live money should require a separate activation/certification build.
+Payment and fulfillment are separate state machines.
+
+## Provider model
+
+Stripe and Ingram are adapters behind Marketplace-owned records. Neither provider becomes the Marketplace database.
+
+## Analytics
+
+`marketplace_events` is first-class from the beginning. Marketing attribution is not reconstructed after launch.

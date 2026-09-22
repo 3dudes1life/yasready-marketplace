@@ -1,9 +1,9 @@
 {
   "name": "yasready-marketplace",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Marketplace | YasReady — storefront, author commerce, marketing attribution, Stripe Connect and Ingram-ready fulfillment foundation.",
+  "description": "Marketplace | YasReady v0.2.0 \u2014 shared YasReady identity, bookstore, author commerce, attribution, Stripe Connect plumbing and Ingram-ready fulfillment.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

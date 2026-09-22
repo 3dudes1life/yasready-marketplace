@@ -1,19 +1,24 @@
-# YasReady -> Ingram integration brief
+# Marketplace | YasReady -> Ingram integration brief
 
-Use this after the demo is ready and Marketplace has a real business identity/contact path.
+## What YasReady is
 
-## What YasReady is building
-Marketplace | YasReady is a multi-author consumer bookstore connected to a publishing-production SaaS. Authors can bring a completed title into the Marketplace, offer multiple editions, market the title using attributable links/QR/embed assets, receive direct sales and view normalized commercial analytics.
+Marketplace | YasReady is the commerce layer of a publishing-production platform. Independent authors can take a finished YasReady title, offer multiple formats from one Marketplace listing, promote the title with trackable links/QR/embeds, receive direct sales and see normalized commercial analytics.
 
-## What to ask Ingram
-We want to discuss the appropriate retailer/technical relationship for:
+## What we want to discuss
 
-1. metadata access for title/edition records;
-2. inventory / availability feed access;
-3. Consumer Direct Fulfillment for orders originating on marketplace.yasready.com;
-4. EDI or other supported order/acknowledgment/ASN/invoice integration;
-5. print-on-demand handling for Lightning Source / IngramSpark-originated titles where eligible;
-6. sales/reporting feeds needed for reconciliation;
-7. the correct path for a marketplace where individual independent authors are the economic sellers represented in YasReady.
+The appropriate Ingram retailer / publisher / technical relationship for:
 
-Do not promise any specific Ingram integration until Ingram confirms eligibility and commercial terms.
+1. title metadata and identifiers;
+2. inventory / availability feeds;
+3. Consumer Direct Fulfillment for orders originating on `marketplace.yasready.com`;
+4. EDI or another supported order / acknowledgment / ASN / invoice flow;
+5. Lightning Source / IngramSpark-originated POD titles where eligible;
+6. reporting feeds for order/fulfillment reconciliation;
+7. whether Ingram Express Checkout / related direct-commerce tooling is relevant to YasReady's model;
+8. the correct commercial structure for a multi-author marketplace.
+
+## Technical posture
+
+Marketplace already separates payment, fulfillment and analytics records. We are not asking Ingram to become our customer database or payment processor; we are looking for the supported catalog + fulfillment relationship.
+
+Current public technical integration contact listed by Ingram: `integrate@ingramcontent.com`.
