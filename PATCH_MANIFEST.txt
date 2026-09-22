@@ -1,0 +1,41 @@
+YasReady Marketplace v0.12.0 patch
+Baseline required: v0.11.0
+Changed/new repo files: 32
+Deleted repo files: 0
+
+FILES IN PATCH:
+.env.example
+BUILD_REPORT.md
+CATALOG_VERIFY.command
+CHANGELOG.md
+COMMERCE_PRO_VERIFY.command
+CONSUMER_VERIFY.command
+INGRAM_OPERATIONS_VERIFY.command
+MARKETING_VERIFY.command
+PREVIEW.html
+README.md
+SHOWCASE.command
+UI_CLOSURE_VERIFY.command
+YASREADY_STYLE_VERIFY.command
+docs/INGRAM-BRIDGE.md
+docs/INGRAM-OPERATIONS-CLOSURE.md
+migrations/0014_ingram_operations.sql
+package.json
+scripts/verify-analytics-brain.mjs
+scripts/verify-books-app.mjs
+scripts/verify-build.mjs
+scripts/verify-catalog.mjs
+scripts/verify-ingram-operations.mjs
+scripts/verify-marketing-studio.mjs
+scripts/verify-ui-closure.mjs
+src/lib/ingram-operations.mjs
+src/lib/ingram.mjs
+src/lib/providers.mjs
+src/main.js
+src/styles.css
+src/worker.mjs
+tests/ingram-operations.test.mjs
+wrangler.jsonc
+
+FILES TO DELETE:
+(none)

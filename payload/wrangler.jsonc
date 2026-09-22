@@ -1,0 +1,54 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "yasready-marketplace",
+  "main": "src/worker.mjs",
+  "compatibility_date": "2026-09-21",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*"
+    ]
+  },
+  "vars": {
+    "MARKETPLACE_MODE": "demo",
+    "YASREADY_AUTH_MODE": "demo",
+    "DEMO_USER_ID": "demo-user-william",
+    "DEMO_USER_EMAIL": "demo@yasready.local",
+    "DEMO_USER_NAME": "William T. Zakrajshek",
+    "CHECKOUT_ENABLED": "false",
+    "STRIPE_MODE": "off",
+    "INGRAM_MODE": "off",
+    "INGRAM_SUBMISSION_ENABLED": "false",
+    "INGRAM_METADATA_IMPORT_ENABLED": "false",
+    "INGRAM_INVENTORY_IMPORT_ENABLED": "false",
+    "INGRAM_INVOICE_IMPORT_ENABLED": "false",
+    "INGRAM_RETRY_ENABLED": "false",
+    "INGRAM_REPORT_IMPORT_ENABLED": "false",
+    "MARKETPLACE_FEE_BPS": "500",
+    "STRIPE_DEFAULT_COUNTRY": "US",
+    "PUBLIC_APP_URL": "https://marketplace.yasready.com",
+    "PUBLISHING_IMPORT_ENABLED": "false",
+    "PUBLISHING_HANDOFF_SCHEMA": "yasready.publishing.marketplace.v1",
+    "PAYOUTS_ENABLED": "false",
+    "REFUNDS_ENABLED": "false",
+    "TRANSFERS_ENABLED": "false",
+    "INGRAM_FULFILLMENT_IMPORT_ENABLED": "false",
+    "BOOKS_APP_BRIDGE_ENABLED": "false",
+    "BOOKS_APP_DELIVERY_ENABLED": "false",
+    "BOOKS_APP_PUSH_ENABLED": "false",
+    "BOOKS_APP_MIN_VERSION": "0.1.0",
+    "BOOKS_APP_SCHEME": "yasreadybooks",
+    "INGRAM_COST_IMPORT_ENABLED": "false"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yasready-marketplace",
+      "database_id": "REPLACE_AFTER_D1_CREATE",
+      "migrations_dir": "migrations"
+    }
+  ]
+}
